@@ -270,7 +270,11 @@ def generate_launch_description():
     # low-texture edge, which is what passive stereo is worst at. The dots are
     # invisible to the colour sensor, so the HSV detection is unaffected.
     emitter_set = TimerAction(
-        period=8.0,
+        # 12 s, not 8: `ros2 param set` fails outright if the node is not up
+        # yet, and librealsense took 8.7 s to reach "RealSense Node Is Up!" on
+        # this Jetson. 8 s worked but with no margin, and the failure is
+        # silent in the sense that the emitter just stays at its default.
+        period=12.0,
         actions=[
             ExecuteProcess(
                 cmd=['ros2', 'param', 'set',
@@ -576,7 +580,7 @@ def generate_launch_description():
         DeclareLaunchArgument('publish_image', default_value='true'),
         DeclareLaunchArgument('publish_mask', default_value='false'),
         DeclareLaunchArgument(
-            'color', default_value='red',
+            'color', default_value='blue',
             description='HSV range to look for: green, blue or red.'),
         DeclareLaunchArgument(
             'border_margin', default_value='12.0',

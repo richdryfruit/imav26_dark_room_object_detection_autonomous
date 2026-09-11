@@ -157,7 +157,11 @@ def generate_launch_description():
     # invisible to the colour sensor so the HSV detection is unaffected. Set
     # emitter:=0 if the projector is washing out a close-range target.
     emitter_set = TimerAction(
-        period=8.0,
+        # 12 s, not 8: `ros2 param set` fails outright if the node is not up
+        # yet, and librealsense took 8.7 s to reach "RealSense Node Is Up!" on
+        # this Jetson. 8 s worked but with no margin, and the failure is
+        # silent in the sense that the emitter just stays at its default.
+        period=12.0,
         actions=[
             ExecuteProcess(
                 cmd=['ros2', 'param', 'set',
