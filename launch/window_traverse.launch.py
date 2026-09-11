@@ -1,7 +1,7 @@
 """
 Window traversal on ARK Flow localisation.
 
-    uXRCE-DDS agent + zed_wrapper (CAMERA ONLY)
+    uXRCE-DDS agent + realsense2_camera (CAMERA ONLY)
     + window_detect (detection AND geometry) + window_traverse (the flight)
 
     arm -> climb -> hold -> sweep for the window -> lock and build a pose
@@ -9,16 +9,38 @@ Window traversal on ARK Flow localisation.
     -> fly through it -> hold on the far side -> land.
 
 This is window_scan.launch.py's mission continued past the lock, flown on
-the localisation stack from sequence_test.launch.py: ARK Flow optical flow
-plus its rangefinder plus the IMU, fused in PX4. Read BOTH of those files
-first -- everything they say about PX4 parameters and about MPC_LAND_SPEED
-applies here unchanged and is not repeated.
+the localisation stack from sequence_test.launch.py: PMW3901 optical flow
+plus a Benewake TFmini Plus rangefinder plus the IMU, fused in PX4. Read BOTH
+of those files first -- everything they say about PX4 parameters and about
+MPC_LAND_SPEED applies here unchanged and is not repeated.
 
-THERE IS NO EXTERNAL VISION HERE. The ZED supplies colour and depth frames so
-window_detect can find and measure the window; it does NOT supply position.
-There is no zed_localization bridge in this file and EKF2_EV_* means nothing
-to it -- if you have EKF2_EV_CTRL set from an earlier VIO experiment, clear it
-back to 0 or EKF2 will sit waiting for vision that never arrives.
+PORTED FROM ZED + ARK FLOW TO REALSENSE D435i + PMW3901 + TFmini PLUS.
+The camera half of that is topics and field of view and lives in
+window_detect.py and in the realsense node below. The sensor half is a PX4
+parameter exercise and touches NO ROS code at all, because every horizontal
+gate in the inherited OffboardSequence is written against EKF2's own flags,
+never against a sensor topic. What it does need on the flight controller:
+
+    SENS_EN_PMW3901 = 1     the flow driver (SPI). EKF2_OF_CTRL = 1.
+    SENS_EN_TFMINI  = 1     the lidar on its serial port, and
+    SENS_TFMINI_CFG = <port>. EKF2_RNG_CTRL = 1, EKF2_HGT_REF = 2.
+    EKF2_OF_QMIN            the PMW3901 reports a coarser quality number than
+                            the ARK Flow's PAW3902 did; if the flow never
+                            latches, this is the first parameter to look at.
+    EKF2_EV_CTRL    = 0     no external vision. See below.
+
+THE ONE THING THE ARK FLOW HAD THAT THE PMW3901 DOES NOT is an integrated
+rangefinder. The TFmini Plus is now a separate device on its own port, so it
+is a separate way for the flight to be un-armable: rangefinder_is_healthy()
+is a hard arming gate and it does not care why the lidar is quiet. Check it
+on the ground, every session, exactly as section 11 of the README says.
+
+THERE IS NO EXTERNAL VISION HERE. The D435i supplies colour and depth frames
+so window_detect can find and measure the window; it does NOT supply position.
+There is no VIO bridge in this file and EKF2_EV_* means nothing to it -- if
+you have EKF2_EV_CTRL set from an earlier VIO experiment, clear it back to 0
+or EKF2 will sit waiting for vision that never arrives. (The D435i has no
+odometry of its own in any case; that was the T265.)
 
 Why: on this airframe the ZED's visual odometry was making EKF2 reset its
 horizontal position six to seven times a second, continuously, even sitting
@@ -156,18 +178,53 @@ def generate_launch_description():
         arguments=['serial', '--dev', '/dev/ttyTHS1', '-b', '921600'],
     )
 
-    zed_wrapper = IncludeLaunchDescription(
+    # PORTED FROM zed_wrapper TO realsense2_camera (D435i).
+    #
+    # align_depth.enable is the one argument that is NOT optional. The D435i's
+    # depth imager is a different, wider lens sitting ~15 mm from the colour
+    # one, so /camera/camera/depth/image_rect_raw is not pixel-registered to
+    # the colour frame the window contour is found in. Without this argument
+    # the aligned topic does not exist at all and window_detect sits reporting
+    # a detection with no distances -- which reads downstream as "no window
+    # geometry", so the flight never leaves LOCK.
+    #
+    # enable_color must be true as well: the detection is an HSV threshold, so
+    # the infra streams the RTAB-Map pipeline uses are no good to it. Colour is
+    # left at 1280x720x30 because that is the D435i's native colour mode and
+    # because window_detect's own max_fps caps the pipeline at 10 Hz anyway --
+    # the driver running faster than the detector costs USB bandwidth, not CPU.
+    #
+    # NOT started here: pointcloud, and the IMU streams. Nothing in this flight
+    # reads them (position is PMW3901 + TFmini Plus through EKF2, not vision),
+    # and on a USB3 bus shared with the flight controller they are bandwidth
+    # spent on nobody.
+    realsense = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
-            FindPackageShare('zed_wrapper'), 'launch', 'zed_camera.launch.py'])),
+            FindPackageShare('realsense2_camera'), 'launch', 'rs_launch.py'])),
         launch_arguments={
-            'camera_model': LaunchConfiguration('camera_model'),
             'camera_name': LaunchConfiguration('camera_name'),
-            # PX4 is the navigation authority on this vehicle; the ZED must not
-            # publish a competing odom -> base_link edge.
+            'camera_namespace': LaunchConfiguration('camera_namespace'),
+            'enable_color': 'true',
+            'enable_depth': 'true',
+            'align_depth.enable': 'true',
+            'rgb_camera.color_profile': LaunchConfiguration('color_profile'),
+            'depth_module.depth_profile': LaunchConfiguration('depth_profile'),
+            # The IR projector. ON, deliberately: the arena is indoors and a
+            # window frame is a low-texture edge, which is the case passive
+            # stereo is worst at. The dots are invisible to the colour sensor,
+            # so this costs the HSV detection nothing.
+            'depth_module.emitter_enabled': '1',
+            'enable_infra1': 'false',
+            'enable_infra2': 'false',
+            'enable_gyro': 'false',
+            'enable_accel': 'false',
+            'pointcloud.enable': 'false',
+            # PX4 is the navigation authority on this vehicle; the camera must
+            # not publish a competing odom -> base_link edge. (The RealSense
+            # driver only publishes static sensor-frame TF, but say so anyway.)
             'publish_tf': 'false',
-            'publish_map_tf': 'false',
         }.items(),
-        condition=IfCondition(LaunchConfiguration('zed')),
+        condition=IfCondition(LaunchConfiguration('camera')),
     )
 
     # Detection and geometry. Same node and the same delay as window_scan; the
@@ -339,18 +396,50 @@ def generate_launch_description():
             'detect', default_value='true',
             description='Start window_detect.'),
         DeclareLaunchArgument(
+            'camera', default_value='true',
+            description='Start realsense2_camera. false if it is already '
+                        'running (from the RTAB-Map stack, say).'),
+        # Kept as an alias so older notes and scripts that say zed:=false do
+        # not silently start a second camera and have librealsense refuse the
+        # device. It does nothing else.
+        DeclareLaunchArgument(
             'zed', default_value='true',
-            description='Start zed_wrapper. false if it is already running.'),
+            description='DEPRECATED alias, ignored. The camera is a RealSense '
+                        'D435i now; use camera:=false.'),
 
         # ---- camera ----
-        DeclareLaunchArgument('camera_model', default_value='zed'),
-        DeclareLaunchArgument('camera_name', default_value='zed'),
         DeclareLaunchArgument(
-            'image_topic', default_value='/zed/zed_node/rgb/color/rect/image',
-            description='Rectified colour image from the left camera.'),
+            'camera_name', default_value='camera',
+            description='realsense2_camera node name. With camera_namespace '
+                        'this is what makes the topics /camera/camera/...'),
         DeclareLaunchArgument(
-            'depth_topic', default_value='/zed/zed_node/depth/depth_registered',
-            description='Depth registered to image_topic, 32FC1 in metres.'),
+            'camera_namespace', default_value='camera',
+            description='Namespace the driver publishes under.'),
+        DeclareLaunchArgument(
+            'color_profile', default_value='1280x720x30',
+            description='D435i colour stream. Native mode; the detector caps '
+                        'itself at max_fps regardless.'),
+        DeclareLaunchArgument(
+            'depth_profile', default_value='848x480x30',
+            description='D435i depth stream. 848x480 is the depth imager\'s '
+                        'native resolution -- asking for anything else makes '
+                        'librealsense rescale and costs accuracy for nothing. '
+                        'The aligned topic is reprojected to the COLOUR '
+                        'resolution anyway, so this is not what sets the '
+                        'resolution window_detect samples corners from.'),
+        DeclareLaunchArgument(
+            'image_topic', default_value='/camera/camera/color/image_raw',
+            description='Colour image. rgb8 on the D435i.'),
+        DeclareLaunchArgument(
+            'depth_topic',
+            default_value='/camera/camera/aligned_depth_to_color/image_raw',
+            description='Depth registered to image_topic, 16UC1 in '
+                        'MILLIMETRES on the RealSense (the ZED published '
+                        '32FC1 metres; window_detect handles both). This must '
+                        'be the aligned_depth_to_color topic, not '
+                        'depth/image_rect_raw -- the latter is in the depth '
+                        'imager\'s own frame and sampling window corners out '
+                        'of it reads the wrong part of the scene.'),
         DeclareLaunchArgument(
             'camera_info_topic', default_value='auto',
             description='CameraInfo for image_topic. "auto" (the default) '
@@ -390,17 +479,22 @@ def generate_launch_description():
                         'this is for debugging the colour detection alone.'),
         DeclareLaunchArgument(
             'depth_scale', default_value='1.0',
-            description='Multiplier on the raw depth image. ROS depth is metres, '
-                        'so 1.0 is right for zed_wrapper. 100.0 if some other '
-                        'driver hands you centimetres. Get this wrong and every '
-                        'distance in the approach is wrong by the same factor.'),
+            description='Multiplier applied AFTER the depth image has been '
+                        'converted to metres, for display only. Leave at 1.0. '
+                        'The RealSense 16UC1 millimetre -> metre conversion is '
+                        'NOT this: window_detect does that from the message '
+                        'encoding, so a D435i needs no change here. 100.0 if '
+                        'you want the centimetres the old standalone script '
+                        'printed.'),
         DeclareLaunchArgument(
-            'fallback_hfov_deg', default_value='90.0',
+            'fallback_hfov_deg', default_value='69.0',
             description='Horizontal FOV assumed ONLY while no CameraInfo has '
                         'arrived on camera_info_topic. It is a guess and it '
                         'scales every angle in /window_geometry; if you see the '
                         'node warn that it is using this, fix the topic name '
-                        'rather than tuning this number.'),
+                        'rather than tuning this number. CHANGED 90 -> 69 for '
+                        'the D435i: that is its COLOUR sensor (measured 70.4 '
+                        'on this unit), not the 87 deg depth/infra pair.'),
         DeclareLaunchArgument(
             'detect_frames', default_value='3',
             description='Consecutive hits before the detection latches true. '
@@ -537,9 +631,16 @@ def generate_launch_description():
 
         # ---- the traversal ----
         DeclareLaunchArgument(
-            'standoff_distance', default_value='1.6',
+            'standoff_distance', default_value='2.0',
             description='m in front of the window plane the approach lines up '
-                        'on, along the window normal.'),
+                        'on, along the window normal. RAISED 1.6 -> 2.0 for '
+                        'the D435i: at 43 deg of VERTICAL field of view the '
+                        '"whole window still in frame" distance is 1.26x the '
+                        'window height, against 0.87x on the ZED, so 1.6 m '
+                        'had no margin left for a 1.2 m aperture. The node '
+                        'also pushes this out further at run time if the '
+                        'aperture it measures needs it -- see '
+                        'effective_standoff() in window_traverse.py.'),
         DeclareLaunchArgument(
             'exit_distance', default_value='1.5',
             description='m beyond the window plane the run through ends.'),
@@ -664,10 +765,16 @@ def generate_launch_description():
         # test is doing the rejecting.
         DeclareLaunchArgument(
             'depth_min', default_value='0.35',
-            description='m. Corner depths below this are not believed.'),
+            description='m. Corner depths below this are not believed. Well '
+                        'clear of the D435i\'s ~0.17 m minimum at 848x480, '
+                        'which is deliberate -- a window corner that close is '
+                        'a misdetection, not a measurement.'),
         DeclareLaunchArgument(
             'depth_max', default_value='8.0',
-            description='m. Above this a gen-1 ZED is guessing.'),
+            description='m. Above this the depth is not believed. A D435i is '
+                        'specified to about 3 m at 2%% error and degrades from '
+                        'there; 8 m is a generous outer bound meant to reject '
+                        'nonsense, not a working range.'),
         DeclareLaunchArgument(
             'corner_spread', default_value='0.25',
             description='m the four corner depths may differ from their median. '
@@ -741,6 +848,6 @@ def generate_launch_description():
         # of these already carry a condition of their own.
         GroupAction([microxrce_node, lcd_node, reboot_node, traverse_node],
                     condition=IfCondition(flight)),
-        zed_wrapper,
+        realsense,
         detect_node,
     ])

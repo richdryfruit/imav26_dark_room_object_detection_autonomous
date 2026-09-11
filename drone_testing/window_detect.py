@@ -1,25 +1,49 @@
 """
-Window detection from the ZED, as a ROS 2 node.
+Window detection from the RealSense D435i, as a ROS 2 node.
 
 Same detection logic as the original standalone script -- HSV threshold on
 green, largest contour, convex hull approximated to a quadrilateral, corner
 depths sampled just inside each corner -- but the frames now come from the
-zed_wrapper node over ROS topics instead of from a pyzed stream.
+realsense2_camera node over ROS topics instead of from a pyzed stream.
 
-    rgb    /zed/zed_node/rgb/image_rect_color        (rectified LEFT camera)
-    depth  /zed/zed_node/depth/depth_registered      (32FC1, metres, aligned
-                                                      to the same left frame)
+    colour /camera/camera/color/image_raw              (rgb8, 1280x720)
+    depth  /camera/camera/aligned_depth_to_color/image_raw
+                                                      (16UC1, MILLIMETRES,
+                                                       registered to the
+                                                       colour frame)
 
-Both topic names are parameters, so if your zed_wrapper build names them
-differently you do not have to touch the code:
+PORTED FROM THE ZED (see the IMAGE_TOPIC block below for the full reasoning).
+The three things that changed, and nothing else did:
+
+    topics        /zed/zed_node/... -> /camera/camera/...  The depth one must
+                  be the ALIGNED variant; the D435i's depth lens is not the
+                  colour lens, so the raw depth map is not registered to the
+                  image the contour was found in.
+    depth units   32FC1 metres -> 16UC1 millimetres. Already handled by
+                  imgmsg_to_depth(); no code change, and 0 still maps to NaN.
+    fallback FOV  90 deg -> 69 deg. The D435i's COLOUR sensor is much
+                  narrower than the ZED was. This only matters until the
+                  first CameraInfo lands, but it matters a lot if it is the
+                  only thing that ever lands.
+
+Colour comes out of the D435i as rgb8, where the ZED published bgra8.
+imgmsg_to_bgr() already converted both, so that needed no change either.
+
+Both topic names are parameters, so if your camera runs under a different
+namespace you do not have to touch the code:
 
     ros2 run drone_testing window_detect --ros-args \
-        -p image_topic:=/zed/zed_node/rgb/image_rect_color \
-        -p depth_topic:=/zed/zed_node/depth/depth_registered
+        -p image_topic:=/camera/camera/color/image_raw \
+        -p depth_topic:=/camera/camera/aligned_depth_to_color/image_raw
 
-Check what your wrapper actually publishes with:
+Check what the driver actually publishes with:
 
-    ros2 topic list | grep zed
+    ros2 topic list | grep camera
+
+If the aligned depth topic is missing, realsense2_camera was started without
+align_depth.enable:=true. Start it with that, or run with use_depth:=false
+and accept a detection with no distances (and so no /window_geometry, and so
+no traversal).
 
 Deliberately no cv_bridge: its compiled extension is built against the
 distro's NumPy, and a pip-installed NumPy 2 in ~/.local makes it segfault on
@@ -247,8 +271,11 @@ def filter_depth(new_d, prev_d, alpha=0.3):
 # happened on the Jetson (exit code -11). None of this code is compiled, so
 # it does not care which NumPy is on the path.
 
-# Encodings a ZED (and most cameras) publish, keyed in LOWER CASE -- ROS
-# spells them '32FC1' and '16UC1', so every lookup lowercases first.
+# Encodings a RealSense (and most cameras) publish, keyed in LOWER CASE --
+# ROS spells them '32FC1' and '16UC1', so every lookup lowercases first.
+# The D435i uses rgb8 for colour and 16uc1 for depth; the ZED this was
+# written against used bgra8 and 32fc1. All four are in the table, so the
+# camera swap cost nothing here.
 _DTYPES = {
     'mono8': (np.uint8, 1), 'mono16': (np.uint16, 1),
     '8uc1': (np.uint8, 1), '8uc3': (np.uint8, 3), '8uc4': (np.uint8, 4),
@@ -279,8 +306,11 @@ def imgmsg_to_array(msg):
 def imgmsg_to_bgr(msg):
     """sensor_msgs/Image -> a 3-channel BGR image, whatever it came in as.
 
-    The ZED publishes its colour topics as bgra8, so the alpha drop here is
-    the same cvtColor(BGRA2BGR) the standalone script did on the SDK buffer.
+    The D435i publishes colour as rgb8, so the RGB2BGR branch below is the
+    live one now; the ZED published bgra8 and took the BGRA2BGR branch. Both
+    are kept -- this function is what makes the node camera-agnostic, and
+    deleting the unused branch is how the next camera swap becomes a code
+    change instead of a parameter.
     """
     enc = msg.encoding.lower()
     array = imgmsg_to_array(msg)
@@ -303,9 +333,15 @@ def imgmsg_to_bgr(msg):
 def imgmsg_to_depth(msg):
     """sensor_msgs/Image -> a float32 depth map in METRES.
 
-    32FC1 is already metres. 16UC1 is the millimetre convention, and 0 there
-    means "no reading" -- it is turned into NaN so the median filter in
-    get_median_depth() rejects it rather than averaging a zero in.
+    32FC1 is already metres (what the ZED published). 16UC1 is the millimetre
+    convention (what the RealSense publishes) and 0 there means "no reading"
+    -- it is turned into NaN so the median filter in get_median_depth()
+    rejects it rather than averaging a zero in.
+
+    That NaN branch is load-bearing on the D435i in a way it was not on the
+    ZED. Stereo depth on a thin window frame drops out far more often than it
+    reads wrong, so 0 is the COMMON failure, not the rare one; letting one
+    through as "0.00 m" would put a window corner at the camera's own origin.
     """
     array = imgmsg_to_array(msg)
     if msg.encoding.lower() == '16uc1':
@@ -421,17 +457,49 @@ class MjpegServer:
 
 class WindowDetect(Node):
 
-    # Topic defaults. These are the standard zed_wrapper (ROS 2) names for the
-    # rectified left colour image and the depth map registered to it.
-    IMAGE_TOPIC = '/zed/zed_node/rgb/image_rect_color'
-    DEPTH_TOPIC = '/zed/zed_node/depth/depth_registered'
-    CAMERA_INFO_TOPIC = '/zed/zed_node/rgb/camera_info'
+    # Topic defaults. CHANGED FOR THE REALSENSE D435i (was the ZED).
+    #
+    # These are the realsense2_camera (ROS 2) names under the default
+    # /camera/camera namespace, verified live on this airframe's D435i
+    # (serial 040322072759, FW 5.16.0.1):
+    #
+    #     colour  /camera/camera/color/image_raw                rgb8, 1280x720
+    #     depth   /camera/camera/aligned_depth_to_color/image_raw   16UC1, mm
+    #
+    # Two things about that depth topic and neither is optional:
+    #
+    #   * It is the ALIGNED one. The D435i's depth sensor is a different,
+    #     wider lens than the colour sensor and sits ~15 mm to its left, so
+    #     /camera/camera/depth/image_rect_raw is NOT pixel-registered to the
+    #     colour frame. Sampling a corner found in the colour image out of
+    #     the unaligned depth map reads the wrong part of the scene, and at
+    #     a window frame -- a thin object with a wall metres behind it --
+    #     "the wrong part of the scene" is exactly the failure the corner
+    #     filters in window_traverse exist to catch. The launch file passes
+    #     align_depth.enable:=true; if you start realsense2_camera by hand,
+    #     you must too, or this topic does not exist at all.
+    #
+    #   * It is 16UC1 in MILLIMETRES, where the ZED published 32FC1 metres.
+    #     imgmsg_to_depth() below already handled both encodings, so this
+    #     needed no code change -- but it is the reason it is written that
+    #     way, and 0 (RealSense's "no reading") becomes NaN there rather
+    #     than a spurious zero-metre corner.
+    IMAGE_TOPIC = '/camera/camera/color/image_raw'
+    DEPTH_TOPIC = '/camera/camera/aligned_depth_to_color/image_raw'
+    CAMERA_INFO_TOPIC = '/camera/camera/color/camera_info'
 
     # Fallback intrinsics, used only until the first CameraInfo arrives (and
-    # for good if camera_info_topic is wrong). A gen-1 ZED at HD720 is about
-    # 90 deg horizontally; getting this wrong scales every angle the geometry
-    # topic reports, so check the log line that says which one is in use.
-    FALLBACK_HFOV_DEG = 90.0
+    # for good if camera_info_topic is wrong). Getting this wrong scales every
+    # angle the geometry topic reports, so check the log line that says which
+    # one is in use.
+    #
+    # CHANGED FOR THE D435i: 90.0 -> 69.0. The gen-1 ZED at HD720 was about
+    # 90 deg horizontally; the D435i's COLOUR sensor is 69 deg (nominal) and
+    # measured 70.4 deg on this unit (CameraInfo fx=906.84 at width 1280 ->
+    # 2*atan(640/906.84)). Note this is the colour sensor specifically: the
+    # D435i's depth/infra pair is much wider at 87 deg, and quoting that
+    # number here would inflate every reported azimuth by a quarter.
+    FALLBACK_HFOV_DEG = 69.0
     MAX_FPS = 10.0              # cap on the detection pipeline; 0 disables it
 
     # Debounce. A single frame's worth of green is not a window: one flash of
@@ -496,7 +564,13 @@ class WindowDetect(Node):
             # launch file shipped image_topic on zed_wrapper's newer
             # .../rgb/color/rect/image naming while camera_info_topic still
             # said .../rgb/camera_info, so CameraInfo never arrived and every
-            # flight ran on the guessed fallback FOV.
+            # flight ran on the guessed fallback FOV. The same trap exists on
+            # the RealSense: /camera/camera/color/image_raw's CameraInfo is
+            # /camera/camera/color/camera_info, but the ALIGNED DEPTH topic
+            # has a camera_info of its own with the DEPTH intrinsics in it.
+            # Deriving from image_topic picks the colour one, which is the
+            # frame the contour was actually found in and therefore the only
+            # correct answer.
             self.camera_info_topic = (
                 self.image_topic.rsplit('/', 1)[0] + '/camera_info')
             self.get_logger().info(
@@ -508,7 +582,7 @@ class WindowDetect(Node):
             'fallback_hfov_deg', self.FALLBACK_HFOV_DEG).value))
 
         # Cap on how often the HSV/contour/depth pipeline actually runs. The
-        # ZED delivers 15-30 fps and the pipeline is the single largest CPU
+        # D435i delivers 30 fps and the pipeline is the single largest CPU
         # consumer on the companion; the aircraft approaches at 0.3-0.45 m/s
         # and the traversal node medians samples over a 2.5 s buffer, so
         # anything above ~10 Hz buys accuracy nobody downstream can use, at
@@ -524,7 +598,7 @@ class WindowDetect(Node):
 
         # Sensor QoS (best effort, depth 1). A best-effort subscription is
         # compatible with a reliable publisher as well, so this works whichever
-        # way zed_wrapper's qos_reliability is configured -- and on a frame we
+        # way the camera driver's QoS is configured -- and on a frame we
         # are processing at camera rate, the newest one is the only one worth
         # having anyway.
         self.create_subscription(Image, self.image_topic,
@@ -532,7 +606,7 @@ class WindowDetect(Node):
         if self.use_depth:
             self.create_subscription(Image, self.depth_topic,
                                      self.depth_callback, qos_profile_sensor_data)
-        # Latched-ish in practice: zed_wrapper republishes CameraInfo with every
+        # Latched-ish in practice: realsense2_camera republishes CameraInfo with every
         # frame, so one message arrives within a frame time of start-up and the
         # fallback FOV is only ever used for the first frame or two.
         if self.publish_geometry_topic:
@@ -805,7 +879,7 @@ class WindowDetect(Node):
         self.publish_frames(cv_image, green_mask, header)
 
         if self.show_windows:
-            cv2.imshow("ZED Image Processing", cv_image)
+            cv2.imshow("RealSense Image Processing", cv_image)
             cv2.imshow("Green Mask", green_mask)
             cv2.waitKey(1)
 
@@ -831,8 +905,11 @@ class WindowDetect(Node):
                        first 15 values and is unaffected.
             columns    (depth_m, azimuth_deg, elevation_deg)
 
-        depth_m is the ZED's depth, which is the distance along the OPTICAL
-        AXIS (the Z of the camera frame), not the slant range to the point.
+        depth_m is the camera's depth, which on both the ZED and the
+        RealSense is the distance along the OPTICAL AXIS (the Z of the camera
+        frame), not the slant range to the point. This is worth re-checking
+        on any new depth camera, because the reconstruction below is only
+        exact for the optical-axis convention.
         That is what makes the reconstruction below exact rather than
         approximate:
 
@@ -1012,14 +1089,16 @@ class WindowDetect(Node):
     def watchdog(self):
         """Complain if the camera stops, and keep /window_detected fresh.
 
-        Without this a dead zed_wrapper looks exactly like "no window in
+        Without this a dead camera driver looks exactly like "no window in
         sight" to anything downstream, which is the one confusion that could
         leave the vehicle yawing forever with a blind camera.
         """
         if self.last_image_time is None:
             self.get_logger().warning(
-                f"No frames on {self.image_topic} yet. Is zed_wrapper running? "
-                "Check `ros2 topic list | grep zed`.",
+                f"No frames on {self.image_topic} yet. Is realsense2_camera "
+                "running? Check `ros2 topic list | grep camera`. If the image "
+                "topic is there but the depth one is not, the driver was "
+                "started without align_depth.enable:=true.",
                 throttle_duration_sec=5.0)
             return
         age = time.monotonic() - self.last_image_time

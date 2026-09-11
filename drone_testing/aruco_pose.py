@@ -2,6 +2,13 @@
 """
 Pose of a downward-facing ArUco marker, as a ROS 2 node.
 
+NOT THE REALSENSE. This node opens the DOWN-FACING USB camera directly with
+cv2.VideoCapture (see the camera_index / width / height / fourcc parameters
+below). It has nothing to do with the D435i that replaced the ZED for the
+window mission, and the 2026 camera swap changed nothing in this file. If you
+ever do repoint it at the D435i's colour stream, hfov_deg must go 78 -> 70 and
+every number in the README's capture-basket table shrinks with it.
+
 Same detection and the same solvePnP maths as the standalone
 aruco_down_pose.py -- IPPE_SQUARE on the four corners of one known-size
 marker -- wrapped in a node that publishes the result instead of printing

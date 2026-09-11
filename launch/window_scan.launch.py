@@ -1,8 +1,8 @@
 """
-Window scan launch: uXRCE-DDS agent + ZED + window detection + the flight.
+Window scan launch: uXRCE-DDS agent + RealSense + window detection + the flight.
 
     arm -> climb to takeoff_altitude -> hold -> sweep the nose through a
-    90 degree arc until the ZED sees the window -> lock the yaw and the
+    90 degree arc until the D435i sees the window -> lock the yaw and the
     position -> land 40 s after the climb started.
 
 WHAT TO RUN
@@ -15,7 +15,7 @@ and the topic names before anything spins:
     ros2 topic echo /window_detected
     ros2 run rqt_image_view rqt_image_view /window_detection/image
 
-Flight. The default starts the agent, the ZED and the detector but NOT the
+Flight. The default starts the agent, the camera and the detector but NOT the
 flight node, so you can run that one by hand and keep the q/k keyboard
 aborts (a node started by launch has no tty, so those keys are dead):
 
@@ -28,15 +28,19 @@ works, and it is the one that matters):
 
     ros2 launch drone_testing window_scan.launch.py agent_only:=false
 
-If zed_wrapper is already running from another launch file, add
-zed:=false so this one does not start a second copy of it.
+PORTED FROM THE ZED TO THE REALSENSE D435i. If realsense2_camera is already
+running from another launch file (the RTAB-Map stack, say), add camera:=false
+so this one does not start a second copy -- librealsense will refuse the
+device rather than share it, and the failure looks like a dead camera.
 
-CHECK THE IMAGE TOPIC FIRST. The default is the standard zed_wrapper name
-for the rectified left colour image:
+CHECK THE IMAGE TOPIC FIRST. The defaults are the realsense2_camera names
+under the default /camera/camera namespace:
 
-    ros2 topic list | grep zed
+    ros2 topic list | grep camera
 
-and if yours differs, pass image_topic:=/your/topic (and depth_topic:=...).
+and if yours differ, pass image_topic:=/your/topic (and depth_topic:=...).
+The depth one must be the ALIGNED variant -- see the argument's description
+below for why that is not a preference.
 """
 
 from launch import LaunchDescription
@@ -61,18 +65,36 @@ def generate_launch_description():
         arguments=['serial', '--dev', '/dev/ttyTHS1', '-b', '921600'],
     )
 
-    # The camera driver. Skipped with zed:=false if you already have one up.
-    zed_launch = IncludeLaunchDescription(
+    # The camera driver. Skipped with camera:=false if you already have one up.
+    #
+    # align_depth.enable is required, not optional: without it the
+    # aligned_depth_to_color topic does not exist and the detector reports a
+    # window with no distances. enable_color is required because the detection
+    # is an HSV threshold and the infra streams are monochrome. See the same
+    # block in window_traverse.launch.py for the full reasoning.
+    camera_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
-            FindPackageShare('zed_wrapper'), 'launch', 'zed_camera.launch.py'])),
+            FindPackageShare('realsense2_camera'), 'launch', 'rs_launch.py'])),
         launch_arguments={
-            'camera_model': LaunchConfiguration('camera_model'),
             'camera_name': LaunchConfiguration('camera_name'),
+            'camera_namespace': LaunchConfiguration('camera_namespace'),
+            'enable_color': 'true',
+            'enable_depth': 'true',
+            'align_depth.enable': 'true',
+            'rgb_camera.color_profile': LaunchConfiguration('color_profile'),
+            'depth_module.depth_profile': LaunchConfiguration('depth_profile'),
+            'depth_module.emitter_enabled': '1',
+            'enable_infra1': 'false',
+            'enable_infra2': 'false',
+            'enable_gyro': 'false',
+            'enable_accel': 'false',
+            'pointcloud.enable': 'false',
+            'publish_tf': 'false',
         }.items(),
-        condition=IfCondition(LaunchConfiguration('zed')),
+        condition=IfCondition(LaunchConfiguration('camera')),
     )
 
-    # Detection. Delayed a little: the ZED SDK takes a few seconds to open the
+    # Detection. Delayed a little: librealsense takes a few seconds to open the
     # camera, and starting the detector into a topic that does not exist yet
     # just fills the log with "no frames" before the first frame arrives.
     detect_node = TimerAction(
@@ -170,7 +192,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'agent_only', default_value='true',
-            description='Start the agent, the ZED and the detector but not the '
+            description='Start the agent, the camera and the detector but not the '
                         'flight node, so you can run that by hand and keep the '
                         'q/k keyboard aborts. false = fly the whole thing.'),
         DeclareLaunchArgument(
@@ -181,22 +203,41 @@ def generate_launch_description():
             'detect', default_value='true',
             description='Start the window_detect node.'),
         DeclareLaunchArgument(
+            'camera', default_value='true',
+            description='Start realsense2_camera. false if it is already '
+                        'running.'),
+        DeclareLaunchArgument(
             'zed', default_value='true',
-            description='Start zed_wrapper. false if it is already running.'),
+            description='DEPRECATED alias, ignored. The camera is a RealSense '
+                        'D435i now; use camera:=false.'),
         DeclareLaunchArgument(
-            'camera_model', default_value='zed',
-            description='ZED model passed to zed_wrapper (zed, zedm, zed2, ...).'),
+            'camera_name', default_value='camera',
+            description='realsense2_camera node name. With camera_namespace '
+                        'this is what makes the topics /camera/camera/...'),
         DeclareLaunchArgument(
-            'camera_name', default_value='zed',
-            description='Namespace zed_wrapper publishes under; the default '
-                        'image_topic below assumes "zed".'),
+            'camera_namespace', default_value='camera',
+            description='Namespace the driver publishes under.'),
         DeclareLaunchArgument(
-            'image_topic', default_value='/zed/zed_node/rgb/color/rect/image',
-            description='Rectified colour image from the left camera. Check '
-                        'yours with `ros2 topic list | grep zed`.'),
+            'color_profile', default_value='1280x720x30',
+            description='D435i colour stream, WxHxFPS.'),
         DeclareLaunchArgument(
-            'depth_topic', default_value='/zed/zed_node/depth/depth_registered',
-            description='Depth map registered to image_topic, 32FC1 in metres.'),
+            'depth_profile', default_value='848x480x30',
+            description='D435i depth stream, WxHxFPS. 848x480 is the depth '
+                        'imager\'s native resolution.'),
+        DeclareLaunchArgument(
+            'image_topic', default_value='/camera/camera/color/image_raw',
+            description='Colour image, rgb8 on the D435i. Check yours with '
+                        '`ros2 topic list | grep camera`.'),
+        DeclareLaunchArgument(
+            'depth_topic',
+            default_value='/camera/camera/aligned_depth_to_color/image_raw',
+            description='Depth registered to image_topic, 16UC1 in '
+                        'MILLIMETRES on the RealSense. It MUST be the '
+                        'aligned_depth_to_color topic: the D435i\'s depth '
+                        'imager is a different lens in a different place, so '
+                        'depth/image_rect_raw is not pixel-registered to the '
+                        'colour frame and sampling a window corner out of it '
+                        'reads the wrong part of the scene.'),
         DeclareLaunchArgument(
             'show_windows', default_value='false',
             description='cv2.imshow the frame and the mask. Needs a display; '
@@ -312,6 +353,6 @@ def generate_launch_description():
         # is fixed when it is built.
         GroupAction([microxrce_node, lcd_node, reboot_node, scan_node],
                     condition=IfCondition(flight)),
-        zed_launch,
+        camera_launch,
         detect_node,
     ])

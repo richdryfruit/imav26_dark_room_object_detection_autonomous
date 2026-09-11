@@ -82,12 +82,46 @@ If a sign in that mapping is wrong the vehicle flies AWAY from the marker
 and keeps accelerating, because every new measurement says "further".
 That is what mode:=bench exists to rule out. Do not skip it.
 
+THE HARDWARE UNDER THIS, AFTER THE 2026 SWAP
+---------------------------------------------
+The airframe went from a ZED + ARK Flow to a RealSense D435i + PMW3901 +
+Benewake TFmini Plus. NEITHER HALF OF THAT REACHES THIS FILE, and it is
+worth being explicit about why, because "the camera changed" is the kind
+of thing that gets a precision-landing node re-tuned for no reason:
+
+  * The camera here was never the ZED. aruco_pose opens the DOWN-FACING
+    USB camera directly with cv2.VideoCapture -- see its header -- so the
+    D435i swap changes nothing in this chain. If you ever do point this
+    at the D435i, note that its colour stream is 70x43 deg where the old
+    down-camera is 78 deg, which SHRINKS the capture basket in the table
+    in the README and would need blind_commit_altitude re-measured.
+
+  * The flow sensor is not read here either. flow_is_healthy() lives in
+    the parent and is written against EKF2's flags and
+    VehicleLocalPosition, never a sensor topic, so PMW3901-vs-ARK-Flow is
+    a PX4 parameter question (EKF2_OF_CTRL, EKF2_OF_QMIN) and not a code
+    one.
+
+  * The rangefinder IS now a separate device (the ARK Flow had one built
+    in). It is the same fused rangefinder as far as this node is
+    concerned, but it is a new independent way for the flight to be
+    un-armable, and it is the one the paragraph below depends on
+    absolutely.
+
+The one thing genuinely worth re-checking on the bench after the swap is
+the PMW3901's noise floor against ALIGN_TOLERANCE: the alignment is only
+ever as tight as the x/y estimate the correction is written in, and a
+15 cm tolerance on a noisier flow sensor may simply never settle. If
+mode:=align keeps timing out just outside tolerance, that is what it is,
+and the answer is a larger align_tolerance, not a larger align_gain.
+
 HEIGHT COMES FROM THE LIDAR, NEVER FROM THE MARKER
 ---------------------------------------------------
 solvePnP's z is scaled by whatever error hfov_deg carries. x and y are
 not -- the inflated range and deflated bearing cancel. So this node takes
 only x and y from the vision, and every altitude decision stays on the
-rangefinder the parent class already gates arming on.
+rangefinder the parent class already gates arming on -- the TFmini Plus
+now, on its own serial port, rather than the ARK Flow's integrated one.
 
 THE BLIND LAST METRE
 --------------------
@@ -123,9 +157,10 @@ from drone_testing.offboard_sequence import OffboardSequence
 def quat_rotate(q, v):
     """Rotate a 3-vector by a (w, x, y, z) quaternion.
 
-    Deliberately a local copy rather than an import from zed_localization:
-    this node must not fail to load because of an unrelated module's
-    dependencies, and the vision-odometry path is not part of this flight.
+    Deliberately a local copy rather than an import from the VIO bridge
+    module: this node must not fail to load because of an unrelated
+    module's dependencies, and the vision-odometry path is not part of
+    this flight.
     """
     w, x, y, z = q
     vx, vy, vz = v

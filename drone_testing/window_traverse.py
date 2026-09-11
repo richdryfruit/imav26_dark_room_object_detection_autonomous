@@ -1,12 +1,32 @@
 """
 Takeoff -> sweep for the window -> estimate where it is -> line up on it ->
-fly through it -> land. Localisation is ARK Flow + rangefinder, fused in PX4.
+fly through it -> land. Localisation is PMW3901 optical flow + TFmini Plus rangefinder, fused in PX4.
 
-The ZED is a CAMERA here and nothing else. It supplies the colour and depth
+PORTED TO THE REALSENSE D435i + PMW3901. The airframe this was written for
+had a ZED stereo camera and an ARK Flow (optical flow WITH an integrated
+rangefinder). It now has an Intel RealSense D435i and a PMW3901 optical flow
+sensor with a SEPARATE Benewake TFmini Plus lidar. What that changed:
+
+    camera      /zed/zed_node/... -> /camera/camera/... and the depth map is
+                16UC1 millimetres instead of 32FC1 metres. All of that lives
+                in window_detect.py; this node only ever sees the ANGLES on
+                /window_geometry, which are metric either way.
+    field of view  ~90x60 deg -> 70x43 deg. This one DID reach this file:
+                STANDOFF_DISTANCE went 1.60 -> 2.00 m and effective_standoff()
+                was added, because on this lens a big aperture stops fitting
+                in the frame at distances the approach actually flies.
+    flow        ARK Flow -> PMW3901 + TFmini Plus. NO CODE CHANGE. Every
+                horizontal gate in the inherited OffboardSequence is written
+                against EKF2's own flags and VehicleLocalPosition, never
+                against a sensor-specific topic, so which flow sensor is
+                bolted on is a PX4 parameter question. See flow_is_healthy()
+                in offboard_sequence.py and the notes in the launch file.
+
+The D435i is a CAMERA here and nothing else. It supplies the colour and depth
 frames the window is found and measured in; it does NOT supply the vehicle's
-position. That comes from PX4's EKF2 fusing the ARK Flow's optical flow and
-its rangefinder, exactly as in sequence_test.launch.py -- no zed_localization
-bridge, no external vision, no EKF2_EV_* parameters. See window_traverse.launch.py.
+position. That comes from PX4's EKF2 fusing the PMW3901's optical flow and
+the TFmini Plus, exactly as in sequence_test.launch.py -- no VIO bridge, no
+external vision, no EKF2_EV_* parameters. See window_traverse.launch.py.
 
 What that costs, and it is not nothing: optical flow needs ground texture and
 a rangefinder reading above FLOW_MIN_AGL, so the horizontal estimate is not
@@ -92,11 +112,12 @@ four corners and the centre, each as (depth, azimuth, elevation) in the
 CAMERA frame. Turning that into a point in NED is three transforms:
 
     1. rays to camera-frame points   x=d, y=d*tan(az), z=-d*tan(el)
-       This is exact rather than approximate because the ZED's depth is the
+       This is exact rather than approximate because the D435i's depth is the
        distance along the optical axis, not the slant range.
     2. camera frame to body FRD      the fixed mounting rotation and lever
-       arm (cam_x/cam_y/cam_z, cam_roll/cam_pitch/cam_yaw -- the SAME
-       numbers, in the same ROS convention, that zed_localization takes)
+       arm (cam_x/cam_y/cam_z, cam_roll/cam_pitch/cam_yaw -- measured to
+       the D435i's LEFT IMAGER, which is where librealsense puts the optical
+       frame origin, not to the middle of the case)
     3. body FRD to NED               rotate by the vehicle attitude
        quaternion, then add the vehicle position
 
@@ -256,7 +277,7 @@ def rpy_to_matrix_frd(roll, pitch, yaw):
 
     The angles are the pose of the camera in the body frame in the ROS
     convention -- x forward, y LEFT, z UP, applied yaw then pitch then roll --
-    because those are the same three numbers zed_localization already takes
+    because those are the three numbers any vision bridge on this airframe takes
     for the same camera, and having the two nodes disagree about the sign of
     cam_pitch is a bug nobody would find in the air.
 
@@ -527,7 +548,7 @@ class WindowEstimator:
 # ---------------------------------------------------------------- the flight
 
 class WindowTraverse(WindowScan):
-    """Sweep, lock, line up, fly through, on ARK Flow localisation.
+    """Sweep, lock, line up, fly through, on PMW3901 + TFmini Plus localisation.
 
     One base, and that is the point. WindowScan brings the sweep, the lock and
     the flight clock; the OffboardSequence underneath it brings arming, the
@@ -536,10 +557,13 @@ class WindowTraverse(WindowScan):
     only new flight code here is the four stages after the lock.
 
     This deliberately does NOT inherit OffboardSequenceVio. That class exists
-    to point the same gates at ZED visual odometry, and it is the right base
-    if you ever go back to external vision -- but the ZED's VO was resetting
-    EKF2's horizontal estimate several times a second on this airframe, so
-    the camera is used for seeing the window and nothing else. See
+    to point the same gates at external visual odometry, and it is the right
+    base if you ever go back to it -- but the ZED's VO was resetting EKF2's
+    horizontal estimate several times a second on this airframe, so the camera
+    is used for seeing the window and nothing else. Nothing about the
+    RealSense swap revisits that decision: the D435i has no odometry of its
+    own at all (that was the T265), so using it for position would mean
+    standing up RTAB-Map or OpenVINS first. See
     tools/ekf_reset_rate.py for how that was measured, and note the one
     behavioural consequence: unlike the vision version, `flow_is_healthy`
     tests dist_bottom against FLOW_MIN_AGL, so the lateral estimate is not
@@ -565,11 +589,58 @@ class WindowTraverse(WindowScan):
     TRAVERSE_STAGES = (RECENTRE, AIM, ALIGN, TRAVERSE, CLEAR)
 
     # ---- the approach -----------------------------------------------------
-    STANDOFF_DISTANCE = 1.60    # m in front of the window plane the approach
+    STANDOFF_DISTANCE = 2.00    # m in front of the window plane the approach
                                 # aims for. Far enough that the whole window is
-                                # still in frame (at 90 deg HFOV a 1 m window
-                                # subtends ~35 deg here) and close enough that
-                                # the run through it is short.
+                                # still in frame and close enough that the run
+                                # through it is short.
+                                #
+                                # RAISED FROM 1.60 FOR THE REALSENSE D435i.
+                                # This number is set by the camera's field of
+                                # view, and the D435i's COLOUR sensor is much
+                                # narrower than the ZED's was -- in the axis
+                                # that binds, by a lot:
+                                #
+                                #     ZED (HD720)   ~90 deg H x ~60 deg V
+                                #     D435i colour   70 deg H x  43 deg V
+                                #       (measured on this unit: CameraInfo
+                                #        fx=906.8 fy=907.4 at 1280x720)
+                                #
+                                # VERTICAL is what binds, and it is the axis
+                                # that got worse. To keep a window of height H
+                                # fully in frame the camera must be at least
+                                #
+                                #     d = (H/2) / tan(VFOV/2)
+                                #
+                                # tan(43.3/2) = 0.397, so d = 1.26*H on the
+                                # D435i where it was 0.87*H on the ZED. A 1.0 m
+                                # window needs 1.26 m and a 1.2 m one needs
+                                # 1.51 m -- so the old 1.60 m default had gone
+                                # from ~1.8x margin to ~1.06x, i.e. none.
+                                #
+                                # 2.00 m restores a sane margin for windows up
+                                # to ~1.3 m tall, and MIN_STANDOFF_MARGIN below
+                                # pushes it out further at run time for anything
+                                # bigger, using the aperture this flight has
+                                # actually measured rather than an assumption.
+    # ---- keeping the window in frame at the standoff point ----------------
+    # The FOV the standoff clamp is computed against. Defaults are the D435i's
+    # colour sensor. These are NOT read from CameraInfo: window_detect already
+    # subscribes to it and bakes the true intrinsics into the ANGLES it
+    # publishes on /window_geometry, so this node never needs the intrinsics
+    # for measurement -- only for this one geometric sanity clamp. Override
+    # them if you fit a different lens.
+    CAMERA_HFOV_DEG = 70.4
+    CAMERA_VFOV_DEG = 43.3
+    MIN_STANDOFF_MARGIN = 1.25  # how much bigger than the bare "just fits"
+                                # distance the standoff must be. 1.0 would put
+                                # the window corners exactly on the frame edge,
+                                # where window_detect flags them TRUNCATED and
+                                # the corner depths are least trustworthy --
+                                # which is precisely when the estimate the
+                                # approach is being steered by would go bad.
+    MAX_STANDOFF_DISTANCE = 4.0 # m. A ceiling on that clamp, so a wildly
+                                # over-estimated aperture cannot walk the
+                                # approach point backwards out of the arena.
     EXIT_DISTANCE = 1.50        # m beyond the window plane the traverse ends
     ALTITUDE_OFFSET = 0.0       # m added to the window centre height. Positive
                                 # is higher. Leave at 0 unless the detected
@@ -577,7 +648,7 @@ class WindowTraverse(WindowScan):
 
     # ---- the airframe -----------------------------------------------------
     # The aircraft is not a point. It is 260 mm tall and 260 mm wide, and the
-    # ZED sits 120 mm above the bottom of the landing gear -- so the thing that
+    # camera sits 120 mm above the bottom of the landing gear -- so the thing that
     # actually has to fit through the aperture hangs BELOW the thing that
     # measures it. Flying the vehicle origin at the window centre put the
     # landing gear on the sill on the first attempt and tipped the aircraft
@@ -734,6 +805,27 @@ class WindowTraverse(WindowScan):
 
         self.STANDOFF_DISTANCE = float(self._declare_number(
             'standoff_distance', self.STANDOFF_DISTANCE))
+
+        # ADDED FOR THE D435i: the standoff clamp that keeps the whole window
+        # inside a much narrower frame than the ZED gave. See
+        # effective_standoff(). Params so a different lens does not need a
+        # code change; tangents cached because this runs every tick.
+        self.CAMERA_HFOV_DEG = float(self._declare_number(
+            'camera_hfov_deg', self.CAMERA_HFOV_DEG))
+        self.CAMERA_VFOV_DEG = float(self._declare_number(
+            'camera_vfov_deg', self.CAMERA_VFOV_DEG))
+        self.MIN_STANDOFF_MARGIN = float(self._declare_number(
+            'min_standoff_margin', self.MIN_STANDOFF_MARGIN))
+        self.MAX_STANDOFF_DISTANCE = float(self._declare_number(
+            'max_standoff_distance', self.MAX_STANDOFF_DISTANCE))
+        self._tan_half_hfov = math.tan(math.radians(self.CAMERA_HFOV_DEG) / 2.0)
+        self._tan_half_vfov = math.tan(math.radians(self.CAMERA_VFOV_DEG) / 2.0)
+        if self._tan_half_hfov <= 0.0 or self._tan_half_vfov <= 0.0:
+            raise SystemExit(
+                f"camera_hfov_deg={self.CAMERA_HFOV_DEG} and "
+                f"camera_vfov_deg={self.CAMERA_VFOV_DEG} must both be in "
+                "(0, 180). They divide into the standoff clamp.")
+        self._last_standoff_logged = 0.0
         self.EXIT_DISTANCE = float(self._declare_number(
             'exit_distance', self.EXIT_DISTANCE))
         self.ALTITUDE_OFFSET = float(self._declare_number(
@@ -806,7 +898,7 @@ class WindowTraverse(WindowScan):
         self.MOVE_SPEED = self.APPROACH_SPEED
 
         # Camera mounting: the pose of the camera in the body frame, ROS
-        # convention (x fwd, y LEFT, z UP), exactly as zed_localization takes
+        # convention (x fwd, y LEFT, z UP), measured to the D435i's LEFT imager
         # it. Give both nodes the same numbers.
         cam_x = float(self._declare_number('cam_x', 0.0))
         cam_y = float(self._declare_number('cam_y', 0.0))
@@ -900,6 +992,12 @@ class WindowTraverse(WindowScan):
         self.traverse_entry = None      # np(3) NED, the standoff point
         self.traverse_exit = None       # np(3) NED, beyond the window
         self.traverse_heading = None    # rad, NED
+        self.traverse_standoff = None   # m, the EFFECTIVE standoff frozen at
+                                        # commit. Must be the same number the
+                                        # entry point was built from, or the
+                                        # run-through measures itself against
+                                        # a line it is not flying -- see
+                                        # effective_standoff().
         self.traverse_window = None     # the estimate it was committed from
         self.blind_traverse_since = None
 
@@ -921,7 +1019,7 @@ class WindowTraverse(WindowScan):
         self.last_good_est_time = 0.0
 
         self.get_logger().warning(
-            f"Window traversal on ARK FLOW: climb {self.TAKEOFF_ALTITUDE:.2f} m, "
+            f"Window traversal on OPTICAL FLOW: climb {self.TAKEOFF_ALTITUDE:.2f} m, "
             f"hold {self.HOLD_SECONDS:.0f} s, "
             + ("wait on the takeoff heading for the window (no sweep), lock, "
                if self.SCAN_SPAN <= 0.0 else
@@ -1146,13 +1244,81 @@ class WindowTraverse(WindowScan):
 
         The altitude of both is the window centre's, clamped into the flight
         envelope by the caller before it becomes a setpoint.
+
+        The standoff is the EFFECTIVE one, not the parameter -- see
+        effective_standoff(). On the narrow-FOV D435i a big aperture has to be
+        approached from further back or it stops fitting in the frame exactly
+        when the approach needs to see it.
         """
         centre = est['centre']
         normal = est['normal']
-        entry = centre + normal * self.STANDOFF_DISTANCE
+        entry = centre + normal * self.effective_standoff(est)
         exit_point = centre - normal * self.EXIT_DISTANCE
         heading = math.atan2(-normal[1], -normal[0])
         return entry, exit_point, heading
+
+    def effective_standoff(self, est):
+        """standoff_distance, pushed back if the window would not fit in frame.
+
+        ADDED FOR THE REALSENSE D435i. The ZED saw ~90x60 deg and the standoff
+        that made the run through the window short was always comfortably
+        further out than the distance at which the aperture still fitted in
+        the picture, so the two never competed and a fixed number was fine.
+
+        The D435i's colour sensor is 70x43 deg. At 43 deg vertical the "still
+        fits" distance is 1.26 * the window height, which for the apertures
+        this mission actually flies is the SAME order as the standoff -- so it
+        can bind, and when it binds the failure is nasty: the window touches
+        the frame edge, window_detect flags the corners TRUNCATED, the corner
+        depths there are the least reliable it produces, and the estimate the
+        approach is being steered by degrades at the exact moment the aircraft
+        is committing to it.
+
+        So the standoff is the larger of what the operator asked for and what
+        the optics require, with MIN_STANDOFF_MARGIN of headroom, capped at
+        MAX_STANDOFF_DISTANCE so a nonsense aperture cannot walk the approach
+        point out of the arena. Both axes are checked, though in practice the
+        vertical one always wins on this camera.
+
+        Returns the parameter unchanged when there is no size estimate yet --
+        this is a refinement of the approach point, never a gate on having one.
+        """
+        width = float(est.get('width') or 0.0)
+        height = float(est.get('height') or 0.0)
+        if width <= 0.0 and height <= 0.0:
+            return self.STANDOFF_DISTANCE
+
+        needed = 0.0
+        if width > 0.0:
+            needed = max(needed, (width / 2.0) / self._tan_half_hfov)
+        if height > 0.0:
+            needed = max(needed, (height / 2.0) / self._tan_half_vfov)
+        needed *= self.MIN_STANDOFF_MARGIN
+
+        standoff = min(max(self.STANDOFF_DISTANCE, needed),
+                       self.MAX_STANDOFF_DISTANCE)
+
+        # Log only when the clamp actually moved the approach point, and only
+        # when the answer changes, so the reason a flight stood off further
+        # than it was told to is in the console without spamming it at 10 Hz.
+        if standoff > self.STANDOFF_DISTANCE + 0.01:
+            if abs(standoff - self._last_standoff_logged) > 0.05:
+                self._last_standoff_logged = standoff
+                self.get_logger().info(
+                    f"standoff pushed out to {standoff:.2f} m (asked "
+                    f"{self.STANDOFF_DISTANCE:.2f} m): a "
+                    f"{width:.2f}x{height:.2f} m aperture does not fit in a "
+                    f"{self.CAMERA_HFOV_DEG:.0f}x{self.CAMERA_VFOV_DEG:.0f} deg "
+                    f"frame any closer than that with "
+                    f"{self.MIN_STANDOFF_MARGIN:.2f}x margin.")
+            if standoff >= self.MAX_STANDOFF_DISTANCE - 0.01:
+                self.get_logger().warning(
+                    f"standoff hit the {self.MAX_STANDOFF_DISTANCE:.1f} m cap "
+                    f"for a {width:.2f}x{height:.2f} m aperture. Either the "
+                    "size estimate is wrong or this window is too big for "
+                    "this lens -- check /window_pose against a tape measure.",
+                    throttle_duration_sec=10.0)
+        return standoff
 
     def window_altitude(self, est):
         """Height above the arming point to fly the traverse at, clamped.
@@ -1986,9 +2152,15 @@ class WindowTraverse(WindowScan):
             # geometry it settled onto.
             heading = self.yaw_setpoint
             entry = np.array([self.move_target_x, self.move_target_y, 0.0])
+            # The last estimate is gone, so the effective standoff cannot be
+            # recomputed. The one the aircraft actually flew to is the last
+            # one logged; fall back to the parameter only if there is none.
+            standoff = (self._last_standoff_logged
+                        if self._last_standoff_logged > self.STANDOFF_DISTANCE
+                        else self.STANDOFF_DISTANCE)
             exit_point = entry + np.array([
-                math.cos(heading) * (self.STANDOFF_DISTANCE + self.EXIT_DISTANCE),
-                math.sin(heading) * (self.STANDOFF_DISTANCE + self.EXIT_DISTANCE),
+                math.cos(heading) * (standoff + self.EXIT_DISTANCE),
+                math.sin(heading) * (standoff + self.EXIT_DISTANCE),
                 0.0])
             self.get_logger().warning(
                 "Committing to the traverse on the settled heading: the pose "
@@ -2002,6 +2174,11 @@ class WindowTraverse(WindowScan):
         self.traverse_entry = entry
         self.traverse_exit = exit_point
         self.traverse_heading = heading
+        # Freeze the standoff the entry point was actually built from. TRAVERSE
+        # stops looking at the camera, so recomputing it from a newer estimate
+        # would be measuring progress along a line the aircraft is not on.
+        self.traverse_standoff = (standoff if est is None
+                                  else self.effective_standoff(est))
         self.blind_traverse_since = None
         self.MOVE_SPEED = self.TRAVERSE_SPEED
         self._set_target(exit_point[0], exit_point[1])
@@ -2050,7 +2227,7 @@ class WindowTraverse(WindowScan):
         # the exit point: a metre of crosstrack error would otherwise read as
         # "not there yet" forever and burn the timeout.
         along = self._distance_along_traverse()
-        total = self.STANDOFF_DISTANCE + self.EXIT_DISTANCE
+        total = (self.traverse_standoff or self.STANDOFF_DISTANCE) + self.EXIT_DISTANCE
         if along >= total - self.ALIGN_TOLERANCE:
             self._begin_clear(f"through, {along:.2f} m flown of {total:.2f} m")
             return
@@ -2104,7 +2281,7 @@ class WindowTraverse(WindowScan):
             self.outcome = (
                 f"BLIND: vision lost mid-traverse, pushed on for "
                 f"{self.BLIND_TRAVERSE_SECONDS:.1f} s and reached {along:.2f} m of "
-                f"{self.STANDOFF_DISTANCE + self.EXIT_DISTANCE:.2f} m")
+                f"{(self.traverse_standoff or self.STANDOFF_DISTANCE) + self.EXIT_DISTANCE:.2f} m")
             self._begin_landing(
                 f"vision did not come back within {self.BLIND_TRAVERSE_SECONDS:.1f} s "
                 "of the blind push")
@@ -2233,7 +2410,7 @@ class WindowTraverse(WindowScan):
             _, cross = self._approach_errors()
             detail = "algn?" if cross is None else f"algnX{cross:+.2f}"
         elif self.current_stage == self.TRAVERSE:
-            total = self.STANDOFF_DISTANCE + self.EXIT_DISTANCE
+            total = (self.traverse_standoff or self.STANDOFF_DISTANCE) + self.EXIT_DISTANCE
             detail = f"thru{self._distance_along_traverse():.1f}/{total:.1f}"
         else:
             detail = f"{max(0.0, self.CLEAR_SECONDS - self._in_stage_for()):.0f}s"

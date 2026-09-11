@@ -1,13 +1,26 @@
 # drone_testing
 
-ROS 2 (Humble) package for autonomous offboard flight on a PX4 vehicle, running
-on a Jetson companion computer.
+ROS 2 package for autonomous offboard flight on a PX4 vehicle, running on a
+Jetson companion computer.
 
-Airframe this is written for: **Pixhawk 6C** (internal IMUs) + **ARK Flow**
-(optical flow + 1-D distance sensor). There is **no GPS and no external
+> **Humble or Jazzy?** This was written against Humble, and the commands below
+> still say `ros-humble-*`. The Jetson this was ported to (section 0) is
+> running **Jazzy**, and the package builds and runs there unchanged —
+> substitute `jazzy` for `humble` throughout. Nothing in the package pins a
+> distro.
+
+Airframe this is written for: **Pixhawk 6C** (internal IMUs) + **PMW3901**
+optical flow + **Benewake TFmini Plus** rangefinder, with an **Intel RealSense
+D435i** as the forward-looking camera. There is **no GPS and no external
 position source** in the takeoff test — height comes from the rangefinder and
 lateral position from optical flow, and the code is written around the
 limitations that implies.
+
+> **This airframe was previously a ZED stereo camera + ARK Flow** (which had
+> optical flow *and* an integrated rangefinder in one unit). If you are reading
+> a log, a commit or a comment that talks about the ZED or the ARK Flow, see
+> **[section 0](#0-the-zed--ark-flow--realsense-d435i--pmw3901-port)** for
+> exactly what changed and what did not.
 
 The headline node is `offboard_takeoff`: arm → sit on the ground → climb to a
 set altitude → hold → descend → disarm, entirely on its own. `offboard_translate`
@@ -17,6 +30,94 @@ further: climb, then a list of motions — translations, altitude changes and ya
 — flown one at a time, then land (see section 6b). `precision_land` lands the
 vehicle on an ArUco marker seen by a downward camera, to within 15 cm (see
 section 6d).
+
+---
+
+## 0. The ZED + ARK Flow → RealSense D435i + PMW3901 port
+
+The airframe changed two things at once. They are very different amounts of
+work and it is worth keeping them apart.
+
+### The flow sensor: ARK Flow → PMW3901 + TFmini Plus — **no code changed**
+
+Not one line. Every horizontal health gate in this package
+(`flow_is_healthy`, `rangefinder_is_healthy`, `estimate_is_healthy`) is
+written against **EKF2's own status flags and `VehicleLocalPosition`**, never
+against a sensor-specific topic — so which flow sensor is bolted underneath is
+a PX4 parameter question and nothing more. Set on the flight controller:
+
+| parameter | value | why |
+|---|---|---|
+| `SENS_EN_PMW3901` | `1` | the flow driver (SPI) |
+| `EKF2_OF_CTRL` | `1` | fuse optical flow |
+| `EKF2_OF_QMIN` | tune | the PMW3901 reports a **coarser quality number** than the ARK Flow's PAW3902 did. If the flow never latches, this is the first parameter to look at |
+| `SENS_EN_TFMINI` | `1` | the TFmini Plus |
+| `SENS_TFMINI_CFG` | *your port* | which serial port it is on |
+| `EKF2_RNG_CTRL` | `1` | fuse the rangefinder — still a hard arming gate |
+| `EKF2_HGT_REF` | `2` | height reference is the rangefinder |
+
+**The one real behavioural difference: the rangefinder is now a separate
+device.** The ARK Flow had it built in, so "the flow works" and "the
+rangefinder works" were one question. They are now two, on two buses, and
+`rangefinder_is_healthy()` is a hard arming gate that does not care which one
+is at fault. Section 11's pre-flight check is not optional any more.
+
+Everything in **section 10.1** about the sticky `cs_rng_kin_consistent` flag
+still applies unchanged — that is EKF2 behaviour, not ARK Flow behaviour.
+
+### The camera: ZED → RealSense D435i — topics, units, and field of view
+
+| | ZED (gen-1, HD720) | RealSense D435i |
+|---|---|---|
+| colour topic | `/zed/zed_node/rgb/image_rect_color` | `/camera/camera/color/image_raw` |
+| depth topic | `/zed/zed_node/depth/depth_registered` | `/camera/camera/aligned_depth_to_color/image_raw` |
+| camera info | `/zed/zed_node/rgb/camera_info` | `/camera/camera/color/camera_info` |
+| colour encoding | `bgra8` | `rgb8` |
+| depth encoding | `32FC1`, **metres** | `16UC1`, **millimetres** |
+| colour FOV | ~90° H × ~60° V | **70° H × 43° V** (measured 70.4 × 43.3 on this unit) |
+| odometry | yes (stereo VO) | **none** — that was the T265 |
+
+Three of those cost nothing. Both encodings were already handled by
+`imgmsg_to_bgr()` / `imgmsg_to_depth()` in `window_detect.py`, and the
+intrinsics come from `CameraInfo`, so resolution is not baked in anywhere.
+
+**Two of them are load-bearing:**
+
+1. **It must be the `aligned_depth_to_color` topic.** The D435i's depth imager
+   is a different, wider lens sitting ~15 mm from the colour one, so
+   `/camera/camera/depth/image_rect_raw` is *not* pixel-registered to the
+   colour frame the window contour was found in. Sampling a window corner out
+   of the unaligned map reads the wrong part of the scene — and at a window
+   frame, "the wrong part of the scene" is the wall metres behind it, which is
+   exactly the outlier `window_traverse`'s corner filters exist to catch.
+   This is why every launch file passes `align_depth.enable:=true`; without
+   it the topic does not exist at all.
+
+2. **The field of view got much narrower, and vertically it is what binds.**
+   To keep a window of height `H` fully in frame the camera must be at least
+   `d = (H/2) / tan(VFOV/2)` away — `1.26 × H` on the D435i where it was
+   `0.87 × H` on the ZED. The old `standoff_distance` of 1.6 m therefore went
+   from comfortable to none at all:
+
+   | window | ZED needs | D435i needs | margin at old 1.6 m | margin at new 2.0 m |
+   |---|---|---|---|---|
+   | 1.0 × 1.0 m | 0.87 m | 1.26 m | 1.27× | 1.59× |
+   | 1.2 × 1.2 m | 1.04 m | 1.51 m | **1.06× — none** | 1.32× |
+   | 1.5 × 1.5 m | 1.30 m | 1.89 m | **0.85× — will not fit** | 1.06× |
+
+   So `standoff_distance` defaults to **2.0 m** now, and `window_traverse`
+   gained `effective_standoff()`, which pushes the approach point further back
+   at run time if the aperture it has actually measured needs it. See
+   section 6f.
+
+### What was NOT ported, and why
+
+| node | status |
+|---|---|
+| `aruco_pose` / `precision_land` | **unaffected.** `aruco_pose` opens the down-facing USB camera directly with `cv2.VideoCapture` and never touched the ZED. Only the flow notes above apply |
+| `zed_localization` / `offboard_sequence_vio` | **not ported.** The D435i has no odometry of its own, so this would mean standing up RTAB-Map or OpenVINS first. `window_traverse` does not use VIO — it localizes on flow + rangefinder, because the ZED's VO was resetting EKF2 6–7×/s (see section 6f) |
+| `bar_detect` / `bar_cross` | **not ported.** Still on ZED topic defaults |
+| `window_detect_darkroom` | **not ported.** Still on ZED topic defaults |
 
 ---
 
@@ -37,6 +138,7 @@ section 6d).
 ```bash
 sudo apt install ros-humble-desktop python3-colcon-common-extensions
 sudo apt install ros-humble-micro-ros-agent      # or build micro-XRCE-DDS-Agent from source
+sudo apt install ros-humble-realsense2-camera    # the D435i driver (section 0)
 pip3 install pyserial pymavlink
 ```
 
@@ -454,35 +556,44 @@ for0.62`, `3/4 up1.50`.
 
 ## 6c. The window scan (`window_detect` + `window_scan`)
 
-Takeoff, sweep the nose through a 90 degree arc until the ZED sees the
+Takeoff, sweep the nose through a 90 degree arc until the D435i sees the
 window, lock onto it, land 40 s after the climb started.
 
 Two nodes:
 
 | node            | what it does |
 |-----------------|--------------|
-| `window_detect` | subscribes to the ZED image (and depth) topics from `zed_wrapper`, runs the HSV / quadrilateral window detection, publishes `/window_detected` |
+| `window_detect` | subscribes to the colour and aligned-depth topics from `realsense2_camera`, runs the HSV / quadrilateral window detection, publishes `/window_detected` |
 | `window_scan`   | the flight. Everything about arming, the climb, the health gates and the landing is inherited from `offboard_sequence`; only the middle of the flight is different |
 
 ### The camera side
 
-`window_detect` reads two topics published by `zed_wrapper`:
+`window_detect` reads two topics published by `realsense2_camera`:
 
 ```
-/zed/zed_node/rgb/image_rect_color      rectified LEFT colour image
-/zed/zed_node/depth/depth_registered    depth, 32FC1 in metres, same frame
+/camera/camera/color/image_raw                  colour, rgb8, 1280x720
+/camera/camera/aligned_depth_to_color/image_raw depth, 16UC1 in MILLIMETRES,
+                                                registered to the colour frame
 ```
 
-**Check these names on the Jetson first** — they vary between wrapper
-versions and with `camera_name`:
+**The depth topic must be the `aligned_depth_to_color` one, not
+`depth/image_rect_raw`.** The D435i's depth imager is a different lens in a
+different place, so the raw depth map is not pixel-registered to the colour
+frame the contour was found in — see [section 0](#0-the-zed--ark-flow--realsense-d435i--pmw3901-port).
+It only exists if the driver was started with `align_depth.enable:=true`,
+which the launch files do for you.
+
+**Check these names on the Jetson first** — they change with `camera_name`
+and `camera_namespace`:
 
 ```bash
-ros2 topic list | grep zed
+ros2 topic list | grep camera
 ```
 
 and if yours differ, pass `image_topic:=...` / `depth_topic:=...`. Depth is
 optional (`use_depth:=false`): without it the window is still detected, only
-the corner distances go missing.
+the corner distances go missing — and with them `/window_geometry`, so the
+traversal in section 6f will never leave `LOCK`.
 
 It publishes:
 
@@ -578,7 +689,7 @@ ros2 launch drone_testing window_scan.launch.py flight:=false
 ros2 launch drone_testing window_scan.launch.py flight:=false publish_mask:=true
 ```
 
-Flight. The default starts the agent, the ZED and the detector but not the
+Flight. The default starts the agent, the camera and the detector but not the
 flight node, so you run that by hand and keep the `q` / `k` aborts:
 
 ```bash
@@ -593,7 +704,7 @@ Everything from the launch file (no keyboard abort — RC kill switch only):
 ros2 launch drone_testing window_scan.launch.py agent_only:=false
 ```
 
-Add `zed:=false` if `zed_wrapper` is already running from somewhere else,
+Add `camera:=false` if `realsense2_camera` is already running from somewhere else,
 or you will start a second copy of it and the SDK will refuse the camera.
 
 ### What the flight does
@@ -627,7 +738,7 @@ as "keep looking" — never as a lock.
 | `detect_seconds` | 0.4 | how long the detection must hold before the sweep stops |
 | `relock_on_loss` | false | true = resume sweeping if the window is lost after the lock |
 | `hold_seconds` | 5.0 | station keeping at altitude before the sweep |
-| `image_topic` / `depth_topic` | see above | the ZED topics (`window_detect`) |
+| `image_topic` / `depth_topic` | see above | the RealSense topics (`window_detect`) |
 | `color` | green | which HSV range to look for: green, blue, red |
 | `min_area` | 1500 | px^2 the contour must exceed |
 | `show_windows` | false | cv2.imshow windows; needs a display |
@@ -653,7 +764,7 @@ Two nodes:
 
 | node             | what it does |
 |------------------|--------------|
-| `aruco_pose`     | opens the USB down-facing camera directly (no `zed_wrapper`, no `cv_bridge`), detects one known-size ArUco marker, solves its pose with `solvePnP` / `IPPE_SQUARE`, publishes `/aruco/detected` and `/aruco/point`. Knows nothing about PX4 |
+| `aruco_pose`     | opens the USB down-facing camera directly (not the D435i, no `cv_bridge`), detects one known-size ArUco marker, solves its pose with `solvePnP` / `IPPE_SQUARE`, publishes `/aruco/detected` and `/aruco/point`. Knows nothing about PX4 |
 | `precision_land` | the flight. Arming, the climb, the health gates, the descent and the touchdown detection are inherited unchanged from `offboard_sequence`; only the middle of the flight is new |
 
 This flies on the same **ARK Flow + lidar + IMU** stack as everything else in
@@ -773,7 +884,7 @@ Your RC kill switch is the real safety net either way.
 ### The camera side
 
 `aruco_pose` opens the camera itself with `cv2.VideoCapture` — it does not go
-through `zed_wrapper`, and like `window_detect` it avoids `cv_bridge`.
+through `realsense2_camera` — it is **not** the D435i — and like `window_detect` it avoids `cv_bridge`.
 
 | topic | type | what |
 |---|---|---|
@@ -987,6 +1098,14 @@ detail field carries the stage and the flight clock: `srch 94s` (searching,
 
 ## 6e. The sequence test on ZED vision (`offboard_sequence_vio`)
 
+> **NOT PORTED to the RealSense.** This whole section still describes the ZED.
+> A D435i has no odometry of its own (that was the T265), so running this on
+> the current airframe means standing up RTAB-Map or OpenVINS first and
+> pointing the bridge at *its* odometry topic. Nothing else in this README
+> depends on this section — `window_traverse` (6f) runs on optical flow. Left
+> here as-is rather than half-ported, because a vision section that has been
+> edited but never flown is worse than one that is honestly stale.
+
 The **same mission as 6b**, flown with lateral position coming from ZED visual
 odometry instead of the ARK Flow's optical flow. Height still comes from the
 lidar. `offboard_sequence_vio` subclasses `OffboardSequence` and changes
@@ -1132,8 +1251,19 @@ vehicle drifts toward whichever one is lying.
 
 Section 6c ends with the vehicle stopped, facing the window, doing nothing
 about it. This is the rest: **estimate where the window actually is, line up
-square in front of it, and fly through.** Localisation is ZED visual odometry
-(section 6e), not optical flow.
+square in front of it, and fly through.** Localisation is **PMW3901 optical
+flow + the TFmini Plus**, fused in PX4 — *not* visual odometry.
+
+> **This corrects an earlier version of this section**, which said the
+> traversal ran on ZED visual odometry (section 6e). It does not, and the code
+> has not for some time: `window_traverse` subclasses `WindowScan` →
+> `OffboardSequence`, deliberately **not** `OffboardSequenceVio`, because the
+> ZED's VO was resetting EKF2's horizontal estimate 6–7 times a second on this
+> airframe (`tools/ekf_reset_rate.py` measures it). The camera is for *seeing
+> the window* and nothing else. The D435i swap does not revisit that: a D435i
+> has no odometry of its own at all — that was the T265 — so putting the
+> position back on the camera would mean standing up RTAB-Map or OpenVINS
+> first. **There is no `EKF2_EV_*` in this flight; clear `EKF2_EV_CTRL` to 0.**
 
 ```bash
 # bench, no props, camera only
@@ -1149,9 +1279,9 @@ Three nodes, and one of them is new:
 
 | node              | what it does |
 |-------------------|--------------|
-| `zed_localization`| ZED odometry → PX4 external vision, exactly as in 6e |
+| `realsense2_camera` | the D435i driver, started by the launch file with `enable_color:=true align_depth.enable:=true` |
 | `window_detect`   | the 6c detection, **plus** `/window_geometry`: the four corners and the centre as (depth, azimuth, elevation) in the camera frame |
-| `window_traverse` | the flight. Subclasses **both** `WindowScan` (the sweep and the lock) and `OffboardSequenceVio` (the vision health gate), so the climb, the sweep, the ramps and the landing are all inherited |
+| `window_traverse` | the flight. Subclasses `WindowScan` (the sweep and the lock) over `OffboardSequence` (arming, the climb, the ramps, the landing, and `flow_is_healthy`), so the only new flight code is the stages after the lock |
 
 ### The stages
 
@@ -1198,12 +1328,14 @@ detector already is. Change the camera resolution and nothing downstream cares.
 `window_traverse` turns each frame into a point in NED in three steps:
 
 1. **rays to camera-frame points** — `x = d`, `y = d·tan(az)`, `z = −d·tan(el)`.
-   Exact, not approximate, because the ZED's depth is the distance along the
+   Exact, not approximate, because the D435i's depth is the distance along the
    optical axis rather than the slant range.
 2. **camera → body FRD** — the mounting rotation and lever arm, from
    `cam_x/cam_y/cam_z` and `cam_roll/cam_pitch/cam_yaw`. **The same six
    numbers, in the same ROS convention (x fwd, y LEFT, z UP), that
-   `zed_localization` takes.** The launch file feeds one set to both nodes so
+   any vision bridge on this airframe takes.** Measure them to the D435i's
+   **left imager**, which is where librealsense puts the optical frame origin
+   — not to the middle of the case. The launch file feeds one set to both nodes so
    they cannot disagree; if you run either by hand, pass the same numbers.
 3. **body FRD → NED** — rotate by the `VehicleAttitude` quaternion, add the
    vehicle position.
@@ -1293,9 +1425,23 @@ where the frame is.
    height. If they do not match a tape measure, the intrinsics or the depth
    scale are wrong, and every distance in the approach is wrong by the same
    factor. (Expect ~2% under: the detector pads its corners 5 px inwards.)
-3. **Check `cs_yaw_align`,** exactly as in 6e — with the magnetometer off you
-   need `EKF2_EV_CTRL=9`, `EKF2_MAG_TYPE=5` and `pose_frame:=ned` (10.3).
-4. Give yourself `standoff_distance + exit_distance` of clear space on the
+3. **Confirm `EKF2_EV_CTRL` is 0.** This step used to say to check
+   `cs_yaw_align` and set `EKF2_EV_CTRL=9` per 10.3 — that was for the
+   visual-odometry version of this flight, which is not what runs. On flow +
+   rangefinder there is no external vision at all, and a leftover
+   `EKF2_EV_CTRL` from a VIO experiment leaves EKF2 waiting for vision that
+   never arrives. The 10.3 yaw-alignment trap only bites when the
+   magnetometer is off *and* vision is supposed to supply the heading; keep
+   the magnetometer on for this flight.
+4. **Check the rangefinder separately from the flow.** New since the ARK
+   Flow: they are two devices on two buses now. Section 11's check is not
+   optional.
+5. **Check the standoff against your window.** The D435i needs `1.26 × window
+   height` just to fit the aperture in frame. `window_traverse` pushes the
+   standoff out on its own if the measured aperture needs it, and logs when
+   it does — but if it warns that it hit `max_standoff_distance`, your window
+   is too big for this lens at any sane distance.
+6. Give yourself `standoff_distance + exit_distance` of clear space on the
    approach side and beyond, plus the `align_tolerance` basket.
 
 ### Parameters
@@ -1304,7 +1450,10 @@ The traversal's own, on top of everything 6c and 6e take:
 
 | parameter | default | what |
 |---|---|---|
-| `standoff_distance` | 1.6 | m in front of the window plane the approach lines up on, along the normal |
+| `standoff_distance` | **2.0** | m in front of the window plane the approach lines up on, along the normal. **Raised from 1.6 for the D435i** — at 43° of vertical FOV a 1.2 m window needs 1.51 m just to fit in frame, so 1.6 m had no margin. See [section 0](#0-the-zed--ark-flow--realsense-d435i--pmw3901-port) |
+| `camera_hfov_deg` / `camera_vfov_deg` | 70.4 / 43.3 | **new.** The FOV the standoff clamp is computed against — the D435i's *colour* sensor, measured on this unit. Not read from `CameraInfo`: `window_detect` already bakes the true intrinsics into the angles it publishes, so this is only used for the one geometric clamp |
+| `min_standoff_margin` | 1.25 | **new.** How much further than "just fits" the approach must stand off. 1.0 would put the window corners on the frame edge, where `window_detect` flags them `TRUNCATED` and the corner depths are least trustworthy |
+| `max_standoff_distance` | 4.0 | **new.** Ceiling on that clamp, so a wildly over-estimated aperture cannot walk the approach point out of the arena |
 | `exit_distance` | 1.5 | m beyond the window plane the run ends |
 | `altitude_offset` | 0.0 | m added to the estimated window centre height |
 | `approach_speed` | 0.30 | m/s during `ALIGN` |
@@ -1317,7 +1466,7 @@ The traversal's own, on top of everything 6c and 6e take:
 | `clear_seconds` | 4.0 | station keeping on the far side |
 | `blind_traverse_seconds` | 3.0 | s of open-loop push if vision dies mid-run |
 | `flight_seconds` | 150.0 | hard limit from the start of the climb — fires from every stage **except** `TRAVERSE` |
-| `cam_x/y/z`, `cam_roll/pitch/yaw` | 0.0 | camera pose in the body frame, ROS convention. **Must match `zed_localization`.** |
+| `cam_x/y/z`, `cam_roll/pitch/yaw` | 0.0 | camera pose in the body frame, ROS convention, measured to the D435i's **left imager**. |
 | `depth_min` / `depth_max` | 0.35 / 8.0 | m, believable corner depths |
 | `corner_spread` / `corner_spread_frac` | 0.25 / 0.15 | m and fraction of range, the primary outlier filter |
 | `plane_tolerance` | 0.15 | m off the best-fit plane |
@@ -1410,7 +1559,7 @@ sudo systemctl daemon-reload && sudo systemctl restart px4-agent.service
 | `lcd_status`       | drives the Arduino status display                                 |
 | `pixhawk_node`     | MAVLink telemetry reader                                          |
 | `cam`              | camera capture helper                                             |
-| `window_detect`    | ZED window detection, publishes `/window_detected` and `/window_geometry` (sections 6c, 6f) |
+| `window_detect`    | RealSense D435i window detection, publishes `/window_detected` and `/window_geometry` (sections 6c, 6f) |
 | `window_scan`      | takeoff, yaw sweep, lock onto the window, land after 40 s (section 6c) |
 | `window_traverse`  | takeoff, sweep, estimate the window's pose, line up and fly through it (section 6f) |
 | `aruco_pose`       | down-camera ArUco pose, publishes `/aruco/detected` and `/aruco/point` (section 6d) |
@@ -1420,8 +1569,8 @@ Other launch files:
 
 - `translate_test.launch.py` — agent + `offboard_translate` (section 6)
 - `sequence_test.launch.py` — agent + `offboard_sequence` (section 6b)
-- `window_scan.launch.py` — agent + ZED + `window_detect` + `window_scan` (section 6c)
-- `window_traverse.launch.py` — agent + ZED + `zed_localization` + `window_detect` + `window_traverse` (section 6f)
+- `window_scan.launch.py` — agent + RealSense D435i + `window_detect` + `window_scan` (section 6c)
+- `window_traverse.launch.py` — agent + RealSense D435i + `window_detect` + `window_traverse` (section 6f)
 - `precision_land.launch.py` — agent + `aruco_pose` + `precision_land` (section 6d)
 - `arm_test.launch.py` — agent + `offboard_mission`, for arm/disarm bench tests
 - `offboard_launch.launch.py` — agent + ZED localization + `offboard_mission`
@@ -1449,7 +1598,7 @@ Other launch files:
 | The vehicle moves the **wrong way** towards the marker | An axis sign is inverted. Land, and go back to `mode:=bench` (section 6d) — this is exactly what that mode exists to catch. Fix `image_rotate` or the mounting. |
 | Aligns, then oscillates around the marker | `align_gain` too high for the camera latency, or the marker is near the frame edge where the uncorrected lens distortion is worst. Lower `align_gain`, and calibrate the camera. |
 | `window_traverse` never leaves `LOCK` | No usable window pose. The node logs which test is rejecting the samples — read that tally. Usual causes: `camera_info_topic` wrong (the log says it is guessing the FOV), the depth map has holes where the frame is (`corner depth missing`), or the sample boxes are landing on the wall behind it (`corner depths disagree` / `corners not coplanar`). |
-| `/window_pose` centre wanders as you move the airframe | The estimate is not being placed correctly in NED. Check `cam_roll/cam_pitch/cam_yaw` and the lever arm — they must be the same numbers `zed_localization` has — and that `/fmu/out/vehicle_attitude` is actually in the PX4 DDS topic list. |
+| `/window_pose` centre wanders as you move the airframe | The estimate is not being placed correctly in NED. Check `cam_roll/cam_pitch/cam_yaw` and the lever arm — they must be measured to the D435i's left imager — and that `/fmu/out/vehicle_attitude` is actually in the PX4 DDS topic list. |
 | `Traverse abandoned: could not settle on the approach point` | VO noise is larger than `align_tolerance`, or the estimate is still moving. Loosen `align_tolerance`, or raise `pose_min_samples` / `buffer_seconds` so the target stops shifting under the aircraft. |
 | Lands 30–40 cm off after a good alignment | Drift during the open-loop descent. Check `precision_descent` is true, and that the flow stays healthy (`flow_ok=True`) down to `FLOW_MIN_AGL`. |
 
