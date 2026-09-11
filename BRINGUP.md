@@ -19,6 +19,12 @@ next one cannot.**
 | [G](#g-first-flight-detection-only) | fly, detect, land. No traversal | on | flies |
 | [H](#h-the-traversal) | the real thing | on | flies through a hole |
 
+> **Flying stages G and H needs [FLIGHT_WINDOW_TRAVERSE.md](FLIGHT_WINDOW_TRAVERSE.md)
+> as well.** Several defaults in this package were measured on the old
+> ZED + ARK Flow airframe — the camera mounting and the airframe dimensions
+> especially — and that document lists every one that has to change before
+> anything flies at a hole.
+
 ---
 
 ## A. One-time setup
