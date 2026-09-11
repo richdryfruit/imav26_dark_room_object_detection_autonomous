@@ -44,7 +44,7 @@ below for why that is not a preference.
 """
 
 from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, GroupAction,
+from launch.actions import (DeclareLaunchArgument, ExecuteProcess, GroupAction,
                             IncludeLaunchDescription, TimerAction)
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -57,12 +57,24 @@ def generate_launch_description():
     agent_only = LaunchConfiguration('agent_only')
     flight = LaunchConfiguration('flight')
 
-    microxrce_node = Node(
-        package='micro_ros_agent',
-        executable='micro_ros_agent',
+    # The uXRCE-DDS agent.
+    #
+    # ExecuteProcess on the STANDALONE BINARY, not a Node on the
+    # micro_ros_agent package. There is no micro_ros_agent binary package for
+    # ROS 2 Jazzy (it existed for Humble), so `package='micro_ros_agent'`
+    # fails at launch time with "package not found" on this Jetson -- and it
+    # fails only on a flight launch, because flight:=false never starts the
+    # agent. The agent built from source lives at /usr/local/bin/MicroXRCEAgent
+    # and takes the same arguments.
+    #
+    # agent_cmd / agent_dev / agent_baud are launch arguments so a machine
+    # that DOES have the ROS package, or a different port, needs no edit.
+    microxrce_node = ExecuteProcess(
+        cmd=[LaunchConfiguration('agent_cmd'), 'serial',
+             '--dev', LaunchConfiguration('agent_dev'),
+             '-b', LaunchConfiguration('agent_baud')],
         name='micro_xrce_dds_agent',
         output='screen',
-        arguments=['serial', '--dev', '/dev/ttyTHS1', '-b', '921600'],
     )
 
     # The camera driver. Skipped with camera:=false if you already have one up.
@@ -202,6 +214,18 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'detect', default_value='true',
             description='Start the window_detect node.'),
+        DeclareLaunchArgument(
+            'agent_cmd', default_value='MicroXRCEAgent',
+            description='The uXRCE-DDS agent binary. Default is the one built '
+                        'from source at /usr/local/bin/MicroXRCEAgent -- there '
+                        'is no micro_ros_agent ROS package for Jazzy. Check '
+                        'with `which MicroXRCEAgent`.'),
+        DeclareLaunchArgument(
+            'agent_dev', default_value='/dev/ttyTHS1',
+            description='Serial port the Pixhawk is on.'),
+        DeclareLaunchArgument(
+            'agent_baud', default_value='921600',
+            description='Must match SER_TEL2_BAUD (or your port) on PX4.'),
         DeclareLaunchArgument(
             'camera', default_value='true',
             description='Start realsense2_camera. false if it is already '

@@ -36,9 +36,27 @@ exec bash
 
 ### A.2 Packages
 
-```bash
-sudo apt install ros-jazzy-realsense2-camera ros-jazzy-micro-ros-agent
-```
+**Nothing to install.** Both dependencies are already on this Jetson, and
+neither comes from apt on Jazzy:
+
+| need | where it is | check |
+|---|---|---|
+| RealSense driver | built in the workspace, not `/opt/ros` | `ros2 pkg list \| grep realsense` |
+| uXRCE-DDS agent | built from source at `/usr/local/bin/MicroXRCEAgent` | `which MicroXRCEAgent` |
+
+> **Do not run `sudo apt install ros-jazzy-micro-ros-agent`.** There is no
+> such package — `micro_ros_agent` was a Humble-era binary and was never
+> published for Jazzy. `E: Unable to locate package` is apt telling you the
+> truth, and because apt aborts the whole command, the `realsense2_camera`
+> half does not install either (you do not need it anyway).
+>
+> The launch files therefore start the agent with `ExecuteProcess` on the
+> standalone binary, not as a ROS node. If yours is somewhere else:
+>
+> ```bash
+> ros2 launch drone_testing window_traverse.launch.py \
+>   agent_cmd:=/path/to/MicroXRCEAgent agent_dev:=/dev/ttyTHS1 agent_baud:=921600
+> ```
 
 ### A.3 Build
 
@@ -502,3 +520,5 @@ ros2 topic echo /fmu/out/estimator_status_flags --once | grep -E "cs_rng|cs_ev|c
 | `/window_pose` wanders as you move | wrong `cam_*` mounting numbers, or `vehicle_attitude` missing from the DDS topic list |
 | `q` / `k` do nothing | node was started by `ros2 launch` — no tty. Use `ros2 run` in its own pane |
 | `option --uninstall not recognized` on build | stale `--symlink-install` state. Main README §2 |
+| `E: Unable to locate package ros-jazzy-micro-ros-agent` | expected — no such package on Jazzy. Nothing to install; see §A.2 |
+| launch dies with `package 'micro_ros_agent' not found` | an old launch file still uses `Node(package='micro_ros_agent')`. `window_scan` and `window_traverse` are fixed; the others are not |
