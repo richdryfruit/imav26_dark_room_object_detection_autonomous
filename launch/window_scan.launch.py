@@ -84,25 +84,90 @@ def generate_launch_description():
     # window with no distances. enable_color is required because the detection
     # is an HSV threshold and the infra streams are monochrome. See the same
     # block in window_traverse.launch.py for the full reasoning.
-    camera_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(PathJoinSubstitution([
-            FindPackageShare('realsense2_camera'), 'launch', 'rs_launch.py'])),
-        launch_arguments={
+    # WRAPPED IN A SCOPED, NON-FORWARDING GroupAction. This is not cosmetic.
+    #
+    # rs_launch.py warns about every launch configuration it can see that is
+    # not one of its own:
+    #
+    #     for param_name in context.launch_configurations.keys():
+    #         if param_name not in supported_params:
+    #             print("Warning: Parameter '<name>' is not supported...")
+    #
+    # and IncludeLaunchDescription FORWARDS the parent's configurations into
+    # the included description by default. So every argument this file
+    # declares -- lcd, agent_only, takeoff_altitude, scan_span_deg, ... --
+    # arrived in rs_launch.py's context and produced a screenful of warnings
+    # with the full supported-parameter list repeated after each one. They
+    # were harmless, but they buried the actual startup log.
+    #
+    # scoped=True gives the include its own configuration scope;
+    # forwarding=False stops the parent's configurations entering it. What
+    # rs_launch.py then sees is exactly the launch_arguments below, all of
+    # which it supports, and the warnings go away.
+    camera_launch = GroupAction(
+        scoped=True,
+        forwarding=False,
+        launch_configurations={
+            # forwarding=False hides the parent's configurations from this
+            # scope -- including from our own substitutions -- so anything the
+            # include needs from outside has to be mapped in HERE. Keyed by
+            # rs_launch.py's own parameter names, so its unsupported-parameter
+            # check stays quiet.
             'camera_name': LaunchConfiguration('camera_name'),
             'camera_namespace': LaunchConfiguration('camera_namespace'),
-            'enable_color': 'true',
-            'enable_depth': 'true',
-            'align_depth.enable': 'true',
             'rgb_camera.color_profile': LaunchConfiguration('color_profile'),
             'depth_module.depth_profile': LaunchConfiguration('depth_profile'),
-            'depth_module.emitter_enabled': '1',
-            'enable_infra1': 'false',
-            'enable_infra2': 'false',
-            'enable_gyro': 'false',
-            'enable_accel': 'false',
-            'pointcloud.enable': 'false',
-            'publish_tf': 'false',
-        }.items(),
+            'decimation_filter.enable': LaunchConfiguration('decimation_filter'),
+            'spatial_filter.enable': LaunchConfiguration('spatial_filter'),
+            'temporal_filter.enable': LaunchConfiguration('temporal_filter'),
+            'hole_filling_filter.enable': LaunchConfiguration('hole_filling'),
+            'accelerate_gpu_with_glsl': LaunchConfiguration('gpu_glsl'),
+        },
+        condition=IfCondition(LaunchConfiguration('camera')),
+        actions=[
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(PathJoinSubstitution([
+                    FindPackageShare('realsense2_camera'),
+                    'launch', 'rs_launch.py'])),
+                launch_arguments={
+                    'enable_color': 'true',
+                    'enable_depth': 'true',
+                    'align_depth.enable': 'true',
+                    'enable_infra1': 'false',
+                    'enable_infra2': 'false',
+                    'enable_gyro': 'false',
+                    'enable_accel': 'false',
+                    'pointcloud.enable': 'false',
+                    'publish_tf': 'false',
+                }.items(),
+            ),
+        ],
+    )
+
+    # The IR projector, set AFTER the node is up.
+    #
+    # depth_module.emitter_enabled is NOT a launch argument of rs_launch.py --
+    # it is not in its configurable_parameters list, so passing it there did
+    # nothing except produce one of the warnings above. It IS a runtime ROS
+    # parameter on the camera node, so the only way to set it from a launch
+    # file is to set it after the node exists.
+    #
+    # Default 1 (ON). The arena is indoors and a window frame is a low-texture
+    # edge, which is the case passive stereo is worst at; the dots are
+    # invisible to the colour sensor so the HSV detection is unaffected. Set
+    # emitter:=0 if the projector is washing out a close-range target.
+    emitter_set = TimerAction(
+        period=8.0,
+        actions=[
+            ExecuteProcess(
+                cmd=['ros2', 'param', 'set',
+                     ['/', LaunchConfiguration('camera_namespace'),
+                      '/', LaunchConfiguration('camera_name')],
+                     'depth_module.emitter_enabled',
+                     LaunchConfiguration('emitter')],
+                output='screen',
+            ),
+        ],
         condition=IfCondition(LaunchConfiguration('camera')),
     )
 
@@ -226,6 +291,59 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'agent_baud', default_value='921600',
             description='Must match SER_TEL2_BAUD (or your port) on PX4.'),
+        # ---- depth post-processing --------------------------------------
+        # All off by default. Each of these trades something away, and for a
+        # thin window frame measured by a node whose whole outlier strategy
+        # assumes the depth is raw, the trades are mostly bad ones.
+        DeclareLaunchArgument(
+            'emitter', default_value='1',
+            description='IR projector: 1 on, 0 off. ON by default -- a window '
+                        'frame is a low-texture edge and the dots are what '
+                        'give passive stereo something to match. Invisible to '
+                        'the colour sensor, so the HSV detection does not '
+                        'care. Applied by `ros2 param set` after startup, '
+                        'because it is not an rs_launch.py argument.'),
+        DeclareLaunchArgument(
+            'hole_filling', default_value='false',
+            description='LEAVE THIS FALSE. The hole-filling filter invents '
+                        'depth for pixels that have none by copying from '
+                        'their neighbours. On a window the holes ARE the '
+                        'aperture, so it fills them with the frame or the '
+                        'wall behind -- fabricating exactly the outlier that '
+                        'window_traverse\'s corner-spread and planarity '
+                        'filters exist to reject, but making it look '
+                        'self-consistent so they no longer can. It converts '
+                        'a detectable failure into an undetectable one.'),
+        DeclareLaunchArgument(
+            'decimation_filter', default_value='false',
+            description='Downsamples depth (848x480 -> 424x240). Good for '
+                        'large flat surfaces, wrong here: a window frame is '
+                        'only a few pixels wide at 3 m and decimation blends '
+                        'it into the background it is being distinguished '
+                        'from.'),
+        DeclareLaunchArgument(
+            'spatial_filter', default_value='false',
+            description='Edge-preserving smoothing; fills small holes. The '
+                        'least harmful of the four and worth TRYING if the '
+                        'rejection tally says "corner depth missing" a lot. '
+                        'Try it before hole filling, and re-check the '
+                        'reconstructed window size against a tape measure '
+                        'afterwards -- smoothing across the frame edge shows '
+                        'up as an aperture that measures slightly wrong.'),
+        DeclareLaunchArgument(
+            'temporal_filter', default_value='false',
+            description='Averages depth across frames. Helps a stationary '
+                        'camera, hurts a moving one -- it lags the approach '
+                        'and smears the frame along the direction of travel. '
+                        'Off.'),
+        DeclareLaunchArgument(
+            'gpu_glsl', default_value='false',
+            description='accelerate_gpu_with_glsl. Moves alignment onto the '
+                        'Jetson GPU. Off by default because it needs a usable '
+                        'GL context and fails awkwardly on a headless boot; '
+                        'try it if the alignment is costing too much CPU, and '
+                        'verify the aligned topic still publishes.'),
+
         DeclareLaunchArgument(
             'camera', default_value='true',
             description='Start realsense2_camera. false if it is already '
@@ -378,5 +496,6 @@ def generate_launch_description():
         GroupAction([microxrce_node, lcd_node, reboot_node, scan_node],
                     condition=IfCondition(flight)),
         camera_launch,
+        emitter_set,
         detect_node,
     ])
