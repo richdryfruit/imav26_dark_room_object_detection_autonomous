@@ -159,8 +159,39 @@ Expect `rgb8` and `16UC1`.
 > reliable QoS and the camera publishes best-effort. This is not a fault.
 > Use the detector's own log lines instead.
 
-Kill it before the next stage (`Ctrl-C`) — librealsense will not share the
-device, and a second copy fails in a way that looks like a dead camera.
+### Kill it before the next stage
+
+**`Ctrl-C`, then check it actually died:**
+
+```bash
+ps -eo pid,etimes,cmd | grep [r]ealsense2_camera_node
+```
+
+You want **no output**. `etimes` is seconds alive — anything you do not
+recognise is a leftover from an earlier run.
+
+```bash
+pkill -f realsense2_camera_node     # if one is stuck
+```
+
+> **This is the single most confusing failure mode in the whole bring-up.**
+> librealsense will not share the device. A second copy does *not* fail
+> cleanly — it loops forever on:
+>
+> ```
+> failed to claim usb interface: 0, error: RS2_USB_STATUS_BUSY
+> acquire_power failed: failed to set power state
+> Device 1/1 failed with exception: failed to set power state
+> The requested device with  is NOT found. Will Try again.
+> ```
+>
+> **And the detector keeps working the whole time**, because the *first*
+> copy is still publishing. So you see a camera node screaming "device NOT
+> found" next to a `window_detect` happily counting frames, which reads like
+> a camera fault and is not. The fix is always: find the other process.
+>
+> Every launch file here starts its own camera. If one is already up, pass
+> `camera:=false` instead of starting a second.
 
 ---
 
@@ -215,6 +246,21 @@ ros2 launch drone_testing window_scan.launch.py flight:=false \
 |---|---|
 | `color` | `green`, `blue`, `red` |
 | `min_area` | raise it until room clutter stops registering. The default 1500 px² is small — on a 1280×720 frame that is a 39 px square |
+
+**Reject the junk by what it reports, not by eye.** A real window at 2–4 m
+fills thousands of px² and its distance is steady. These lines are noise:
+
+```
+window: YES  centre=(76,549)  offset=-0.88  area=312px   dist=12.20m
+window: YES  centre=(88,526)  offset=-0.86  area=936px   dist=18.64m
+```
+
+Three tells, all present above: **area in the hundreds**, **distance jumping
+6→12→18 m between frames**, and **`offset` pinned near ±0.87** — the target
+is jammed in the corner of the frame, which is where a real window being
+approached never is. Raise `min_area` until they stop (try 4000–8000 at
+1280×720) and re-check against your actual window at the range you will
+fly it.
 | `publish_mask:=true` | publishes the HSV mask so you can see *what* it is thresholding |
 
 > **Expect false positives indoors at the default `min_area`.** On this
@@ -509,7 +555,8 @@ ros2 topic echo /fmu/out/estimator_status_flags --once | grep -E "cs_rng|cs_ev|c
 |---|---|
 | `aligned_depth_to_color` topic missing | driver started without `align_depth.enable:=true` |
 | `ros2 topic hz` shows nothing on camera topics | reliable-vs-best-effort QoS. Not a fault. Use the node's logs |
-| camera opens, then a second launch kills it | librealsense will not share the device. Use `camera:=false` on the second one |
+| `RS2_USB_STATUS_BUSY` / `failed to set power state`, looping, **while the detector still gets frames** | a second camera process. The first one still owns the device and is still publishing. `ps -eo pid,etimes,cmd \| grep [r]ealsense2_camera_node`, kill the one you do not want, or use `camera:=false`. See §B |
+| camera opens, then a second launch kills it | same thing. Only one process can own the D435i |
 | node warns it is guessing the FOV | `camera_info_topic` is wrong. Fix the topic, do not tune `fallback_hfov_deg` |
 | `Not arming: need z_valid and dist_bottom_valid` | TFmini not being fused. Check `EKF2_RNG_CTRL`, `EKF2_HGT_REF`, and the wiring |
 | `cs_rng_kin_consistent false` | sticky flag. **Reboot the flight controller.** Main README §10.1 |
