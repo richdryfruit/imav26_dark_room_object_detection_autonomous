@@ -1,75 +1,72 @@
-[window_traverse-5] [WARN] [1789124116.739506065] [window_traverse]: RECENTRE: the whole window is in frame and measured. window at (+1.30, +1.07, -1.01) NED, facing -166 deg, 0.78x0.68 m, 6 samples, 16 ms old.
-[window_traverse-5] [WARN] [1789124116.741822808] [window_traverse]: AIM: turning to +14 deg to face the window square-on, holding position. window at (+1.30, +1.07, -1.01) NED, facing -166 deg, 0.78x0.68 m, 6 samples, 20 ms old.
-[window_traverse-5] [INFO] [1789124116.780399762] [window_traverse]: AIM: 10 deg to turn. window at (+1.30, +1.07, -1.01) NED, facing -166 deg, 0.78x0.68 m, 6 samples, 57 ms old
-[window_detect-4] [INFO] [1789124116.816132757] [window_detect]: window: YES  centre=(1017,430) offset=+0.59 area=60796px dist=4.02m
-[window_traverse-5] [INFO] [1789124117.074197589] [window_traverse]: alt=+1.19 m airborne=True xy_valid=True z_valid=True | dist_bottom=1.20 m rng_ok=True vz=-0.00 m/s landed=False | xy=POS-HOLD flow_ok=True vxy=(-0.02,-0.01) | hdg=+5 deg yaw_sp=+9 deg
-[window_traverse-5] [WARN] [1789124117.236962601] [window_traverse]: ALIGN: flying to (-0.26, +0.70) NED, 1.60 m in front of the window on its axis, at 0.30 m/s. window at (+1.30, +1.07, -1.01) NED, facing -166 deg, 0.78x0.68 m, 6 samples, 516 ms old.
-[window_traverse-5] [INFO] [1789124117.278118307] [window_traverse]: ALIGN: pose stale, holding the last target. no usable pose (5/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x50, corner depth missing x4)
-[window_traverse-5] [INFO] [1789124117.293746723] [window_traverse]: ALIGN: +0.58 m along / -0.76 m across to the approach point (tolerances 0.25/0.06), 7 deg off the normal, alt +1.19/0.94 m. no usable pose (5/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x50, corner depth missing x4)
-[window_detect-4] [INFO] [1789124117.846887616] [window_detect]: window: YES  centre=(891,419) offset=+0.39 area=50610px dist=5.27m
-[window_traverse-5] [INFO] [1789124118.074371375] [window_traverse]: alt=+1.16 m airborne=True xy_valid=True z_valid=True | dist_bottom=1.19 m rng_ok=True vz=+0.08 m/s landed=False | xy=POS-HOLD flow_ok=True vxy=(+0.05,+0.05) | hdg=+14 deg yaw_sp=+14 deg
-[window_traverse-5] [INFO] [1789124118.285290477] [window_traverse]: ALIGN: pose stale, holding the last target. no usable pose (1/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x58, corner depth missing x4)
-[window_traverse-5] [INFO] [1789124118.334575192] [window_traverse]: ALIGN: +0.52 m along / -0.68 m across to the approach point (tolerances 0.25/0.06), 0 deg off the normal, alt +1.13/0.94 m. no usable pose (1/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x59, corner depth missing x4)
-[window_traverse-5] [INFO] [1789124118.525408602] [window_traverse]: window: no usable pose (1/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x60, corner depth missing x4)
-[window_detect-4] [INFO] [1789124118.856549330] [window_detect]: window: YES  centre=(840,386) offset=+0.31 area=52237px dist=6.15m
-[window_traverse-5] [INFO] [1789124119.125807294] [window_traverse]: alt=+1.02 m airborne=True xy_valid=True z_valid=True | dist_bottom=1.04 m rng_ok=True vz=+0.10 m/s landed=False | xy=POS-HOLD flow_ok=True vxy=(+0.02,+0.11) | hdg=+13 deg yaw_sp=+14 deg
-[window_traverse-5] [INFO] [1789124119.327050918] [window_traverse]: ALIGN: pose stale, holding the last target. no usable pose (0/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x66, corner depth missing x4)
-[window_traverse-5] [INFO] [1789124119.375647981] [window_traverse]: ALIGN: +0.44 m along / -0.55 m across to the approach point (tolerances 0.25/0.06), 1 deg off the normal, alt +0.98/0.94 m. no usable pose (0/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x67, corner depth missing x4)
-[window_detect-4] [INFO] [1789124119.949807005] [window_detect]: window: YES  centre=(802,336) offset=+0.25 area=58027px dist=4.92m
-[window_traverse-5] [INFO] [1789124120.132224991] [window_traverse]: alt=+0.92 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.93 m rng_ok=True vz=+0.00 m/s landed=False | xy=POS-HOLD flow_ok=True vxy=(+0.07,+0.13) | hdg=+13 deg yaw_sp=+14 deg
-[window_traverse-5] [INFO] [1789124120.334406080] [window_traverse]: ALIGN: pose stale, holding the last target. no usable pose (0/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x75, corner depth missing x4)
-[window_traverse-5] [INFO] [1789124120.376073687] [window_traverse]: ALIGN: +0.36 m along / -0.41 m across to the approach point (tolerances 0.25/0.06), 1 deg off the normal, alt +0.92/0.94 m. no usable pose (0/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x75, corner depth missing x4)
-[window_traverse-5] [INFO] [1789124120.528285726] [window_traverse]: window: no usable pose (0/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x76, corner depth missing x4)
-[window_detect-4] [WARN] [1789124121.053771999] [window_detect]: No CameraInfo on /zed/zed_node/rgb/camera_info yet; guessing the intrinsics from fallback_hfov_deg=90.
-[window_detect-4] [INFO] [1789124121.055324737] [window_detect]: window: YES  centre=(743,320) offset=+0.16 area=67437px dist=5.24m
-[window_traverse-5] [INFO] [1789124121.176312021] [window_traverse]: alt=+0.92 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.93 m rng_ok=True vz=-0.02 m/s landed=False | xy=POS-HOLD flow_ok=True vxy=(+0.15,+0.15) | hdg=+14 deg yaw_sp=+14 deg
-[window_traverse-5] [INFO] [1789124121.378159717] [window_traverse]: ALIGN: pose stale, holding the last target. no usable pose (0/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x83, corner depth missing x4)
-[window_traverse-5] [INFO] [1789124121.380512953] [window_traverse]: ALIGN: +0.20 m along / -0.27 m across to the approach point (tolerances 0.25/0.06), 0 deg off the normal, alt +0.92/0.94 m. no usable pose (0/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x83, corner depth missing x4)
-[window_detect-4] [INFO] [1789124122.086864650] [window_detect]: window: YES  centre=(682,321) offset=+0.07 area=85049px dist=5.03m
-[window_traverse-5] [INFO] [1789124122.231699110] [window_traverse]: alt=+0.91 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.92 m rng_ok=True vz=-0.01 m/s landed=False | xy=POS-HOLD flow_ok=True vxy=(+0.12,+0.12) | hdg=+14 deg yaw_sp=+14 deg
-[window_traverse-5] [INFO] [1789124122.427274909] [window_traverse]: ALIGN: pose stale, holding the last target. no usable pose (0/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x90, corner depth missing x4)
-[window_traverse-5] [INFO] [1789124122.428410036] [window_traverse]: ALIGN: +0.03 m along / -0.12 m across to the approach point (tolerances 0.25/0.06), 1 deg off the normal, alt +0.91/0.94 m. no usable pose (0/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x90, corner depth missing x4)
-[window_traverse-5] [INFO] [1789124122.536437044] [window_traverse]: window: no usable pose (0/6 fresh samples, 50 accepted ever, 47 truncated; rejections: corner depths disagree x91, corner depth missing x4)
-[window_detect-4] [INFO] [1789124123.180695387] [window_detect]: window: YES  centre=(634,321) offset=-0.01 area=104244px dist=4.53m
-[window_traverse-5] [INFO] [1789124123.275766483] [window_traverse]: alt=+0.93 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.93 m rng_ok=True vz=-0.03 m/s landed=False | xy=POS-HOLD flow_ok=True vxy=(+0.04,+0.08) | hdg=+14 deg yaw_sp=+14 deg
-[window_traverse-5] [ERROR] [1789124123.278353893] [window_traverse]: Traverse abandoned: no usable window pose for 6 s during ALIGN.
-[window_traverse-5] [WARN] [1789124123.279607518] [window_traverse]: Landing: traverse abandoned -- no usable window pose for 6 s during ALIGN
-[window_traverse-5] [INFO] [1789124123.284166326] [window_traverse]: Horizontal control -> zero-velocity hold for descent.
-[window_detect-4] [INFO] [1789124124.280547437] [window_detect]: window: YES  centre=(625,264) offset=-0.02 area=112904px dist=4.57m
-[window_traverse-5] [INFO] [1789124124.327198495] [window_traverse]: alt=+0.79 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.83 m rng_ok=True vz=+0.16 m/s landed=False | xy=VEL-HOLD flow_ok=True vxy=(+0.03,+0.02) | hdg=+13 deg yaw_sp=+14 deg
-[window_traverse-5] [INFO] [1789124124.579531509] [window_traverse]: window: no usable pose (2/6 fresh samples, 52 accepted ever, 47 truncated; rejections: corner depths disagree x103, corner depth missing x4)
-[window_traverse-5] [INFO] [1789124125.328765079] [window_traverse]: alt=+0.62 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.65 m rng_ok=True vz=+0.13 m/s landed=False | xy=VEL-HOLD flow_ok=True vxy=(+0.01,-0.04) | hdg=+14 deg yaw_sp=+14 deg
-[window_detect-4] [INFO] [1789124125.351879874] [window_detect]: window: YES  centre=(582,167) offset=-0.09 area=112469px dist=4.48m
-[window_detect-4] [WARN] [1789124126.125097721] [window_detect]: No CameraInfo on /zed/zed_node/rgb/camera_info yet; guessing the intrinsics from fallback_hfov_deg=90.
-[window_traverse-5] [INFO] [1789124126.330462610] [window_traverse]: alt=+0.47 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.50 m rng_ok=True vz=+0.12 m/s landed=False | xy=VEL-HOLD flow_ok=True vxy=(+0.02,-0.03) | hdg=+13 deg yaw_sp=+14 deg
-[window_detect-4] [INFO] [1789124126.380088685] [window_detect]: window: YES  centre=(639,121) offset=-0.00 area=82382px dist=4.40m
-[window_traverse-5] [INFO] [1789124126.625244996] [window_traverse]: window: window in sight but TRUNCATED (0 px to the frame edge, 60 such frames) -- not measurable until the whole aperture is in view
-[window_traverse-5] [INFO] [1789124127.375995750] [window_traverse]: alt=+0.34 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.36 m rng_ok=True vz=+0.06 m/s landed=False | xy=VEL-HOLD flow_ok=True vxy=(+0.05,-0.01) | hdg=+14 deg yaw_sp=+14 deg
-[window_detect-4] [INFO] [1789124127.392006263] [window_detect]: window: YES  centre=(642,85) offset=+0.00 area=56257px dist=4.34m
-[window_traverse-5] [INFO] [1789124128.423416299] [window_traverse]: alt=+0.24 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.26 m rng_ok=True vz=+0.08 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.05,-0.02) | hdg=+11 deg yaw_sp=+14 deg
-[window_detect-4] [INFO] [1789124128.514844466] [window_detect]: window: YES  centre=(679,56) offset=+0.06 area=36650px dist=4.39m
-[window_traverse-5] [INFO] [1789124128.632402921] [window_traverse]: window: window in sight but TRUNCATED (0 px to the frame edge, 75 such frames) -- not measurable until the whole aperture is in view
-[window_traverse-5] [INFO] [1789124129.430842664] [window_traverse]: alt=+0.17 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.19 m rng_ok=True vz=-0.03 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.09,-0.03) | hdg=+12 deg yaw_sp=+14 deg
-[window_detect-4] [INFO] [1789124129.546554909] [window_detect]: window: YES  centre=(73,289) offset=-0.89 area=349px dist=2.65m
-[window_traverse-5] [WARN] [1789124129.827216233] [window_traverse]: Descent has stalled against something solid; PX4's land detector still says airborne. Confirming touchdown ourselves over 2 s.
-[window_traverse-5] [WARN] [1789124130.075551105] [window_traverse]: Descent has stalled against something solid; PX4's land detector still says airborne. Confirming touchdown ourselves over 2 s.
-[window_traverse-5] [WARN] [1789124130.174941158] [window_traverse]: Descent has stalled against something solid; PX4's land detector still says airborne. Confirming touchdown ourselves over 2 s.
-[window_traverse-5] [WARN] [1789124130.337076042] [window_traverse]: Descent has stalled against something solid; PX4's land detector still says airborne. Confirming touchdown ourselves over 2 s.
-[window_traverse-5] [INFO] [1789124130.433650600] [window_traverse]: alt=+0.22 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.20 m rng_ok=True vz=-0.08 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(-0.00,+0.01) | hdg=+10 deg yaw_sp=+14 deg
-[window_detect-4] [INFO] [1789124130.577749595] [window_detect]: window: YES  centre=(106,296) offset=-0.83 area=264px dist=2.63m
-[window_traverse-5] [INFO] [1789124130.676495256] [window_traverse]: window: no usable pose (0/6 fresh samples, 52 accepted ever, 76 truncated; rejections: corner depths disagree x111, corner depth missing x4, implausible window size x1)
-[window_detect-4] [WARN] [1789124130.743279185] [window_detect]: Window LOST.
-[window_traverse-5] [INFO] [1789124131.478661805] [window_traverse]: alt=+0.19 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.19 m rng_ok=True vz=-0.02 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.00,-0.01) | hdg=+10 deg yaw_sp=+14 deg
-[window_detect-4] [INFO] [1789124131.649021637] [window_detect]: window: no   (streak 13 misses, 395 frames processed, 772 skipped by max_fps=10)
-[window_traverse-5] [ERROR] [1789124132.378550210] [window_traverse]: Touchdown confirmed by stalled descent, NOT by PX4's land detector. Check MPC_LAND_SPEED against land_speed and the LNDMC_* thresholds.
-[window_traverse-5] [WARN] [1789124132.379663633] [window_traverse]: Touchdown detected. Disarming.
-[window_detect-4] [INFO] [1789124132.732889685] [window_detect]: window: no   (streak 21 misses, 403 frames processed, 788 skipped by max_fps=10)
-[window_detect-4] [INFO] [1789124133.888184659] [window_detect]: window: no   (streak 29 misses, 411 frames processed, 808 skipped by max_fps=10)
-[window_detect-4] [INFO] [1789124134.915597737] [window_detect]: window: no   (streak 37 misses, 419 frames processed, 828 skipped by max_fps=10)
-[window_detect-4] [WARN] [1789124135.286164816] [window_detect]: No CameraInfo on /zed/zed_node/rgb/camera_info yet; guessing the intrinsics from fallback_hfov_deg=90.
-[window_detect-4] [INFO] [1789124135.921035655] [window_detect]: window: no   (streak 5 misses, 427 frames processed, 846 skipped by max_fps=10)
-[window_detect-4] [WARN] [1789124136.652962412] [window_detect]: WINDOW DETECTED  (centre=(780,5) offset=+0.22 area=706px dist=1.26m)
-[window_detect-4] [INFO] [1789124136.967502050] [window_detect]: window: YES  centre=(757,7) offset=+0.18 area=368px dist=1.24m
-[window_traverse-5] [ERROR] [1789124137.423892497] [window_traverse]: Disarm refused and we still look airborne. Handing over to PX4 AUTO.LAND rather than cutting the motors.
-[window_traverse-5] [INFO] [1789124137.478479310] [window_traverse]: Idle. Ctrl-C to exit.
-[window_traverse-5] [INFO] [1789124137.544076557] [window_traverse]: nav_state -> AUTO_LAND(18)
+[offboard_takeoff-2] [INFO] [1789275355.969867735] [offboard_takeoff]: nav_state -> MANUAL(0)
+[offboard_takeoff-2] [INFO] [1789275355.973105714] [offboard_takeoff]: PX4 failsafe (expected on this airframe, harmless): gcs_connection_lost, home_position_invalid
+[offboard_takeoff-2] [WARN] [1789275355.991315279] [offboard_takeoff]: lidar reports signal_quality=0 at 0.11 m (driver declares a 0.40 m minimum). Using the reading anyway: this sensor is accurate below that minimum. If the number itself looks wrong, THAT is the problem.
+[offboard_takeoff-2] [INFO] [1789275355.995655281] [offboard_takeoff]: alt=n/a airborne=False xy_valid=True z_valid=True | dist_bottom=0.10 m lidar=0.11 m rng_ok=True vz=-0.00 m/s landed=True | xy=VEL-HOLD flow_ok=False vxy=(+0.00,-0.00)
+[offboard_takeoff-2] [INFO] [1789275356.947647249] [offboard_takeoff]: Setpoint stream established, position estimate healthy.
+[offboard_takeoff-2] [INFO] [1789275356.992290614] [offboard_takeoff]: Requesting Offboard mode...
+[offboard_takeoff-2] [INFO] [1789275357.029019967] [offboard_takeoff]: nav_state -> OFFBOARD(14)
+[offboard_takeoff-2] [INFO] [1789275357.042090996] [offboard_takeoff]: Offboard mode active.
+[offboard_takeoff-2] [INFO] [1789275357.292330990] [offboard_takeoff]: Arming point captured: x=0.12 y=-0.02 z=-0.10 yaw=-0.00 rad
+[offboard_takeoff-2] [WARN] [1789275357.293571127] [offboard_takeoff]: ARMED. Holding on the ground for 5 s.
+[offboard_takeoff-2] [INFO] [1789275357.344982258] [offboard_takeoff]: Armed on the ground, 5.0 s to takeoff...
+[offboard_takeoff-2] [INFO] [1789275357.349012925] [offboard_takeoff]: alt=+0.00 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.10 m lidar=0.11 m rng_ok=True vz=-0.01 m/s landed=True | xy=VEL-HOLD flow_ok=False vxy=(-0.00,+0.00)
+[offboard_takeoff-2] [INFO] [1789275358.394860748] [offboard_takeoff]: Armed on the ground, 3.9 s to takeoff...
+[offboard_takeoff-2] [INFO] [1789275358.398946688] [offboard_takeoff]: alt=+0.00 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.10 m lidar=0.11 m rng_ok=True vz=-0.01 m/s landed=True | xy=VEL-HOLD flow_ok=False vxy=(-0.01,+0.02)
+[offboard_takeoff-2] [INFO] [1789275359.395070800] [offboard_takeoff]: Armed on the ground, 2.9 s to takeoff...
+[offboard_takeoff-2] [INFO] [1789275359.399250891] [offboard_takeoff]: alt=+0.00 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.11 m lidar=0.11 m rng_ok=True vz=-0.01 m/s landed=True | xy=VEL-HOLD flow_ok=False vxy=(-0.00,+0.01)
+[offboard_takeoff-2] [INFO] [1789275360.445601654] [offboard_takeoff]: Armed on the ground, 1.8 s to takeoff...
+[offboard_takeoff-2] [INFO] [1789275360.449642657] [offboard_takeoff]: alt=+0.00 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.10 m lidar=0.11 m rng_ok=True vz=-0.01 m/s landed=True | xy=VEL-HOLD flow_ok=False vxy=(-0.00,+0.00)
+[offboard_takeoff-2] [WARN] [1789275360.992289105] [offboard_takeoff]: lidar reports signal_quality=0 at 0.11 m (driver declares a 0.40 m minimum). Using the reading anyway: this sensor is accurate below that minimum. If the number itself looks wrong, THAT is the problem.
+[offboard_takeoff-2] [INFO] [1789275361.445715587] [offboard_takeoff]: Armed on the ground, 0.8 s to takeoff...
+[offboard_takeoff-2] [INFO] [1789275361.449727063] [offboard_takeoff]: alt=+0.00 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.10 m lidar=0.11 m rng_ok=True vz=-0.01 m/s landed=True | xy=VEL-HOLD flow_ok=False vxy=(+0.00,-0.00)
+[offboard_takeoff-2] [WARN] [1789275362.344612660] [offboard_takeoff]: Climbing to 1.20 m (datum z=-0.10).
+[offboard_takeoff-2] [INFO] [1789275362.497565926] [offboard_takeoff]: alt=-0.00 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.10 m lidar=0.11 m rng_ok=True vz=-0.01 m/s landed=True | xy=VEL-HOLD flow_ok=False vxy=(+0.00,-0.00)
+[offboard_takeoff-2] [INFO] [1789275363.498640804] [offboard_takeoff]: alt=+0.01 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.13 m lidar=0.11 m rng_ok=True vz=-0.01 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(-0.03,+0.02)
+[offboard_takeoff-2] [ERROR] [1789275363.726991602] [offboard_takeoff]: PX4 failsafe SET: battery_warning=1
+[offboard_takeoff-2] [ERROR] [1789275364.508162471] [offboard_takeoff]: PX4 failsafe SET: battery_warning=2
+[offboard_takeoff-2] [INFO] [1789275364.509721115] [offboard_takeoff]: PX4 failsafe cleared: battery_warning=1
+[offboard_takeoff-2] [INFO] [1789275364.548514470] [offboard_takeoff]: alt=+0.15 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.25 m lidar=0.12 m rng_ok=True vz=-0.04 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(-0.05,+0.02)
+[offboard_takeoff-2] [ERROR] [1789275364.726250573] [offboard_takeoff]: PX4 failsafe SET: battery_warning=3
+[offboard_takeoff-2] [INFO] [1789275364.727773346] [offboard_takeoff]: PX4 failsafe cleared: battery_warning=2
+[offboard_takeoff-2] [INFO] [1789275365.598340978] [offboard_takeoff]: alt=+0.24 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.32 m lidar=0.12 m rng_ok=True vz=-0.09 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(-0.03,+0.01)
+[offboard_takeoff-2] [WARN] [1789275365.993451638] [offboard_takeoff]: lidar reports signal_quality=0 at 0.12 m (driver declares a 0.40 m minimum). Using the reading anyway: this sensor is accurate below that minimum. If the number itself looks wrong, THAT is the problem.
+[offboard_takeoff-2] [INFO] [1789275366.598432900] [offboard_takeoff]: alt=+0.34 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.41 m lidar=0.12 m rng_ok=True vz=-0.12 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(-0.00,-0.00)
+[offboard_takeoff-2] [INFO] [1789275367.648431212] [offboard_takeoff]: alt=+0.30 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.34 m lidar=0.13 m rng_ok=True vz=-0.20 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.16,-0.23)
+[offboard_takeoff-2] [INFO] [1789275368.698354865] [offboard_takeoff]: alt=+0.44 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.52 m lidar=0.25 m rng_ok=True vz=-0.17 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.05,-0.17)
+[offboard_takeoff-2] [INFO] [1789275369.699350937] [offboard_takeoff]: alt=+0.52 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.58 m lidar=0.33 m rng_ok=True vz=-0.23 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(-0.08,-0.01)
+[offboard_takeoff-2] [INFO] [1789275370.741398991] [offboard_takeoff]: alt=+0.72 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.80 m lidar=0.42 m rng_ok=True vz=-0.14 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(-0.05,-0.04)
+[offboard_takeoff-2] [WARN] [1789275370.993496147] [offboard_takeoff]: lidar reports signal_quality=0 at 0.40 m (driver declares a 0.40 m minimum). Using the reading anyway: this sensor is accurate below that minimum. If the number itself looks wrong, THAT is the problem.
+[offboard_takeoff-2] [ERROR] [1789275371.047083958] [offboard_takeoff]: Height estimate has come unanchored. EKF says 0.75 m (dist_bottom 0.85 m) but the lidar reads 0.39 m -- divergence 0.46 m. Descending now.
+[offboard_takeoff-2] [WARN] [1789275371.048310432] [offboard_takeoff]: Landing: EKF height diverged from the rangefinder
+[offboard_takeoff-2] [INFO] [1789275371.746784796] [offboard_takeoff]: alt=+0.71 m airborne=True xy_valid=True z_valid=True | dist_bottom=0.83 m lidar=0.23 m rng_ok=True vz=+0.10 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(-0.05,-0.01)
+[offboard_takeoff-2] [INFO] [1789275372.796020207] [offboard_takeoff]: alt=+0.68 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.67 m lidar=0.12 m rng_ok=True vz=-0.17 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(-0.09,-0.04)
+[offboard_takeoff-2] [INFO] [1789275373.846627760] [offboard_takeoff]: alt=+0.48 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.34 m lidar=0.13 m rng_ok=True vz=-0.12 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(-0.06,+0.01)
+[offboard_takeoff-2] [INFO] [1789275374.896234492] [offboard_takeoff]: alt=+0.20 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.34 m lidar=0.12 m rng_ok=True vz=-0.07 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.01,-0.01)
+[offboard_takeoff-2] [INFO] [1789275375.946047508] [offboard_takeoff]: alt=+0.31 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.43 m lidar=0.11 m rng_ok=True vz=-0.10 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.00,-0.01)
+[offboard_takeoff-2] [WARN] [1789275376.040367333] [offboard_takeoff]: lidar reports signal_quality=0 at 0.12 m (driver declares a 0.40 m minimum). Using the reading anyway: this sensor is accurate below that minimum. If the number itself looks wrong, THAT is the problem.
+[offboard_takeoff-2] [INFO] [1789275376.946086152] [offboard_takeoff]: alt=+0.44 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.55 m lidar=0.11 m rng_ok=True vz=-0.14 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.00,-0.02)
+[offboard_takeoff-2] [INFO] [1789275377.996120045] [offboard_takeoff]: alt=+0.64 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.73 m lidar=0.11 m rng_ok=True vz=-0.17 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.02,-0.05)
+[offboard_takeoff-2] [INFO] [1789275378.996323656] [offboard_takeoff]: alt=+0.86 m airborne=False xy_valid=True z_valid=True | dist_bottom=0.93 m lidar=0.11 m rng_ok=True vz=-0.20 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.01,-0.03)
+[offboard_takeoff-2] [INFO] [1789275380.046619796] [offboard_takeoff]: alt=+1.08 m airborne=False xy_valid=True z_valid=True | dist_bottom=1.14 m lidar=0.11 m rng_ok=True vz=-0.21 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.01,-0.02)
+[offboard_takeoff-2] [WARN] [1789275381.040963299] [offboard_takeoff]: lidar reports signal_quality=0 at 0.11 m (driver declares a 0.40 m minimum). Using the reading anyway: this sensor is accurate below that minimum. If the number itself looks wrong, THAT is the problem.
+[offboard_takeoff-2] [INFO] [1789275381.096050389] [offboard_takeoff]: alt=+1.29 m airborne=False xy_valid=True z_valid=True | dist_bottom=1.36 m lidar=0.11 m rng_ok=True vz=-0.22 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.02,-0.04)
+[offboard_takeoff-2] [INFO] [1789275382.144990128] [offboard_takeoff]: alt=+1.55 m airborne=False xy_valid=True z_valid=True | dist_bottom=1.62 m lidar=0.11 m rng_ok=True vz=-0.23 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.07,-0.10)
+[offboard_takeoff-2] [INFO] [1789275383.146000484] [offboard_takeoff]: alt=+2.00 m airborne=False xy_valid=True z_valid=True | dist_bottom=2.13 m lidar=0.11 m rng_ok=True vz=-0.26 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.18,-0.19)
+[offboard_takeoff-2] [INFO] [1789275384.195996131] [offboard_takeoff]: alt=+2.71 m airborne=False xy_valid=True z_valid=True | dist_bottom=2.80 m lidar=0.11 m rng_ok=True vz=-0.32 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.25,-0.27)
+[offboard_takeoff-2] [INFO] [1789275385.196039819] [offboard_takeoff]: alt=+3.37 m airborne=False xy_valid=True z_valid=True | dist_bottom=3.41 m lidar=0.11 m rng_ok=True vz=-0.36 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.29,-0.32)
+[offboard_takeoff-2] [WARN] [1789275386.041660867] [offboard_takeoff]: lidar reports signal_quality=0 at 0.11 m (driver declares a 0.40 m minimum). Using the reading anyway: this sensor is accurate below that minimum. If the number itself looks wrong, THAT is the problem.
+[offboard_takeoff-2] [INFO] [1789275386.245907583] [offboard_takeoff]: alt=+3.95 m airborne=False xy_valid=True z_valid=True | dist_bottom=3.95 m lidar=0.11 m rng_ok=True vz=-0.39 m/s landed=False | xy=VEL-HOLD flow_ok=False vxy=(+0.30,-0.34)
+[offboard_takeoff-2] [ERROR] [1789275386.720772398] [offboard_takeoff]: PX4 failsafe SET: battery_warning=2
+[offboard_takeoff-2] [INFO] [1789275386.722349635] [offboard_takeoff]: PX4 failsafe cleared: battery_warning=3
+[offboard_takeoff-2] [INFO] [1789275386.742041147] [offboard_takeoff]: Disarmed during descent. Done.
+[offboard_takeoff-2] [INFO] [1789275386.791738276] [offboard_takeoff]: Idle. Ctrl-C to exit.
+[offboard_takeoff-2] [ERROR] [1789275387.466928370] [offboard_takeoff]: PX4 failsafe SET: battery_warning=1
+[offboard_takeoff-2] [INFO] [1789275387.468453992] [offboard_takeoff]: PX4 failsafe cleared: battery_warning=2
+[offboard_takeoff-2] [ERROR] [1789275387.794695814] [offboard_takeoff]: PX4 failsafe SET: offboard_control_signal_lost
+[offboard_takeoff-2] [ERROR] [1789275388.012948516] [offboard_takeoff]: PX4 failsafe SET: local_velocity_invalid
+[offboard_takeoff-2] [WARN] [1789275388.117694791] [offboard_takeoff]: EKF2 height reset: delta_z=+3.81 m, shifted altitude reference to match.
+[offboard_takeoff-2] [INFO] [1789275390.862247773] [offboard_takeoff]: PX4 failsafe cleared: local_velocity_invalid
+[offboard_takeoff-2] [WARN] [1789275391.041780523] [offboard_takeoff]: lidar reports signal_quality=0 at 0.36 m (driver declares a 0.40 m minimum). Using the reading anyway: this sensor is accurate below that minimum. If the number itself looks wrong, THAT is the problem.
+[offboard_takeoff-2] [ERROR] [1789275391.194716526] [offboard_takeoff]: PX4 failsafe SET: local_velocity_invalid
+[offboard_takeoff-2] [INFO] [1789275391.840466126] [offboard_takeoff]: Idle. Ctrl-C to exit.
+[offboard_takeoff-2] [INFO] [1789275393.265304100] [offboard_takeoff]: PX4 failsafe cleared: local_velocity_invalid

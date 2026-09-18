@@ -1,0 +1,71 @@
+[3.257s] Invoking command in '/home/ark-jetson-orin-2/offboard_imav26_test': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base build/drone_testing build --build-base /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build install --record /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/install.log --install-scripts $base/lib/drone_testing --single-version-externally-managed install_data
+[4.099s] running egg_info
+[4.162s] writing build/drone_testing/drone_testing.egg-info/PKG-INFO
+[4.163s] writing dependency_links to build/drone_testing/drone_testing.egg-info/dependency_links.txt
+[4.163s] writing entry points to build/drone_testing/drone_testing.egg-info/entry_points.txt
+[4.164s] writing requirements to build/drone_testing/drone_testing.egg-info/requires.txt
+[4.164s] writing top-level names to build/drone_testing/drone_testing.egg-info/top_level.txt
+[4.295s] reading manifest file 'build/drone_testing/drone_testing.egg-info/SOURCES.txt'
+[4.303s] writing manifest file 'build/drone_testing/drone_testing.egg-info/SOURCES.txt'
+[4.306s] running build
+[4.306s] running build_py
+[4.308s] copying drone_testing/offboard_takeoff.py -> /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing
+[4.311s] copying drone_testing/fc_reboot.py -> /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing
+[4.315s] copying drone_testing/doll_detect.py -> /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing
+[4.318s] copying drone_testing/ring_detect.py -> /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing
+[4.321s] copying drone_testing/window_room_traverse.py -> /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing
+[4.322s] copying drone_testing/ring_grab.py -> /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing
+[4.324s] copying drone_testing/ring_math.py -> /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing
+[4.325s] copying drone_testing/room_display.py -> /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing
+[4.328s] running install
+[4.341s] running install_lib
+[4.404s] copying /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing/offboard_takeoff.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing
+[4.405s] copying /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing/fc_reboot.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing
+[4.405s] copying /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing/doll_detect.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing
+[4.409s] copying /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing/ring_detect.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing
+[4.411s] copying /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing/window_room_traverse.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing
+[4.411s] copying /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing/ring_grab.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing
+[4.411s] copying /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing/ring_math.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing
+[4.411s] copying /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build/lib/drone_testing/room_display.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing
+[4.416s] byte-compiling /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/offboard_takeoff.py to offboard_takeoff.cpython-312.pyc
+[4.436s] byte-compiling /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/fc_reboot.py to fc_reboot.cpython-312.pyc
+[4.443s] byte-compiling /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/doll_detect.py to doll_detect.cpython-312.pyc
+[4.454s] byte-compiling /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/ring_detect.py to ring_detect.cpython-312.pyc
+[4.462s] byte-compiling /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/window_room_traverse.py to window_room_traverse.cpython-312.pyc
+[4.482s] byte-compiling /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/ring_grab.py to ring_grab.cpython-312.pyc
+[4.499s] byte-compiling /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/ring_math.py to ring_math.cpython-312.pyc
+[4.507s] byte-compiling /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/room_display.py to room_display.cpython-312.pyc
+[4.514s] running install_data
+[4.517s] copying launch/takeoff_test.launch.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch
+[4.517s] copying launch/window_traverse.launch.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch
+[4.522s] copying launch/ring_grab.launch.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch
+[4.522s] copying launch/window_room_traverse.launch.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch
+[4.523s] copying launch/window_scan.launch.py -> /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch
+[4.524s] running install_egg_info
+[4.582s] removing '/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing-0.0.0-py3.12.egg-info' (and everything under it)
+[4.585s] Copying build/drone_testing/drone_testing.egg-info to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing-0.0.0-py3.12.egg-info
+[4.586s] running install_scripts
+[4.730s] Installing aruco_pose script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.733s] Installing bar_cross script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.736s] Installing bar_detect script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.736s] Installing cam script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.736s] Installing doll_detect script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.737s] Installing fc_reboot script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.737s] Installing lcd_status script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.737s] Installing offboard_mission script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.741s] Installing offboard_sequence script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.742s] Installing offboard_sequence_vio script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.743s] Installing offboard_takeoff script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.744s] Installing offboard_translate script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.745s] Installing pixhawk_node script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.746s] Installing precision_land script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.747s] Installing ring_detect script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.748s] Installing ring_grab script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.748s] Installing room_display script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.748s] Installing window_detect script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.749s] Installing window_room_traverse script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.749s] Installing window_scan script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.750s] Installing window_traverse script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.750s] Installing zed_localization script to /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing
+[4.750s] writing list of installed files to '/home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/install.log'
+[4.830s] Invoked command in '/home/ark-jetson-orin-2/offboard_imav26_test' returned '0': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base build/drone_testing build --build-base /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/build install --record /home/ark-jetson-orin-2/offboard_imav26_test/build/drone_testing/install.log --install-scripts $base/lib/drone_testing --single-version-externally-managed install_data

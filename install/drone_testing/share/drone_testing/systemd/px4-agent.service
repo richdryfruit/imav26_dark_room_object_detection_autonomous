@@ -1,0 +1,61 @@
+# Boots the Jetson straight into a flight-ready state: starts the uXRCE-DDS
+# agent AND the offboard_takeoff node. Once this is up, flipping the Offboard
+# switch on the TX arms the drone and flies the profile -- no SSH needed.
+#
+# READ BEFORE ENABLING:
+#   * systemd gives the node no tty, so the q / k keyboard aborts are DEAD.
+#     Your RC kill switch and the TX mode switch are the ONLY aborts. Verify
+#     the kill switch on the bench, props off, before every session.
+#   * This runs on EVERY boot -- including a battery swap in the field or a
+#     brownout reboot. The drone will be armed-and-waiting whenever powered.
+#   * Restart=no is deliberate. With Restart=on-failure a node that aborted
+#     would be relaunched seconds later and re-arm on its own.
+#
+# The node waits indefinitely in OFFBOARD_REQUEST for the TX switch (no
+# timeout, since request_offboard_from_ros is false), so there is no rush
+# after power-up.
+#
+# Install:
+#   sudo cp ~/px4_ros_ws/src/offboard_imav26_test/drone_testing/px4-agent.service \
+#           /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now px4-agent.service
+#
+# Operate:
+#   systemctl status px4-agent.service
+#   journalctl -u px4-agent.service -f      # the flight log
+#   sudo systemctl stop px4-agent.service   # abort from a shell
+#   sudo systemctl disable --now px4-agent.service   # stop autostart at boot
+#
+# To change altitude / hold time, edit ExecStart below, then:
+#   sudo systemctl daemon-reload && sudo systemctl restart px4-agent.service
+#
+# Prerequisites:
+#   - the user must be in the dialout group for /dev/ttyTHS1 access:
+#       sudo usermod -aG dialout gymkhana   (then reboot)
+#   - nothing else may hold the port. On some Jetsons a serial console is
+#     bound to it; check and disable:
+#       systemctl status serial-getty@ttyTHS1
+#       sudo systemctl disable --now serial-getty@ttyTHS1
+
+[Unit]
+Description=PX4 DDS agent + offboard takeoff node (drone_testing)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ark-jetson-orin
+Group=dialout
+WorkingDirectory=/home/ark-jetson-orin/imav26_ws
+Environment="HOME=/home/ark-jetson-orin"
+Environment="ROS_DOMAIN_ID=0"
+# bash -lc with inline sourcing is required: systemd does not read .bashrc,
+# so without it ros2 is not even on PATH.
+ExecStart=/bin/bash -lc 'source /opt/ros/jazzy/setup.bash && source /home/ark-jetson-orin/imav26_ws/install/setup.bash && exec ros2 launch drone_testing takeoff_test.launch.py agent_only:=false request_offboard_from_ros:=false takeoff_altitude:=0.30 hold_seconds:=5.0'
+Restart=no
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

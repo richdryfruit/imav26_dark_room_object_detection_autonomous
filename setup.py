@@ -29,6 +29,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pixhawk_node = drone_testing.pixhawk_node:main',
+            'preflight_check = drone_testing.preflight_check:main',
             'offboard_mission = drone_testing.offboard_mission:main',
             'offboard_takeoff = drone_testing.offboard_takeoff:main',
             'offboard_translate = drone_testing.offboard_translate:main',
@@ -41,10 +42,18 @@ setup(
             'window_detect = drone_testing.window_detect:main',
             'window_scan = drone_testing.window_scan:main',
             'window_traverse = drone_testing.window_traverse:main',
+            'window_room_traverse = drone_testing.window_room_traverse:main',
+            'doll_detect = drone_testing.doll_detect:main',
+            'room_display = drone_testing.room_display:main',
+            'qgc_doll_status = drone_testing.qgc_doll_status:main',
+            'doll_count_gui = drone_testing.doll_count_gui:main',
             'bar_detect = drone_testing.bar_detect:main',
             'bar_cross = drone_testing.bar_cross:main',
             'aruco_pose = drone_testing.aruco_pose:main',
+            'ring_detect = drone_testing.ring_detect:main',
+            'ring_grab = drone_testing.ring_grab:main',
             'precision_land = drone_testing.precision_land:main',
+            'mission_fsm = drone_testing.mission_fsm:main',
         ],
     },
 )

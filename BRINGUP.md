@@ -103,7 +103,40 @@ separate devices**; on the ARK Flow they were one.
 | `SENS_EN_TFMINI` | `1` | TFmini Plus |
 | `SENS_TFMINI_CFG` | *your port* | which serial port |
 | `EKF2_RNG_CTRL` | `1` | fuse rangefinder — hard arming gate |
-| `EKF2_HGT_REF` | `2` | height reference is the rangefinder |
+| `EKF2_HGT_REF` | `2` | height reference is the rangefinder. **Not the baro** — it drifts metres indoors and is not an acceptable fallback datum on this airframe |
+| `EKF2_MIN_RNG` | `0.10` | the reading EKF2 substitutes when the lidar is unhealthy at rest. Set it to the vehicle's standing height so a substituted value is at least plausible — and note that `dist_bottom` frozen at exactly this number means *no measurement*, not 10 cm |
+| `EKF2_RNG_POS_Z` | measured | lidar offset below the IMU, positive down. Wrong here and the height is biased by exactly that error at every altitude |
+
+### The rangefinder's declared minimum range — check this before flying
+
+The TFmini Plus reads accurately below 0.10 m, which is this vehicle's standing
+height, so the lidar can see the floor while parked. **But EKF2 does not decide
+that for itself**: its validity window is the `min_distance` / `max_distance`
+the *driver* publishes in `distance_sensor` (see §10.1 in the README). If the
+driver declares a conservative family-wide minimum above the vehicle's standing
+height, EKF2 discards every reading taken on the ground, and with
+`EKF2_HGT_REF = 2` there is then **no height datum at all** down there — the
+estimate free-runs on integrated accelerometer bias. That is the 2026-09-13
+failure: 5.27 m logged with the vehicle never off the floor.
+
+On the FC console:
+
+```
+listener distance_sensor
+```
+
+Read `min_distance` off that output. It must be **below** the parked standing
+height (~0.10 m); 0.05 m or less is comfortable. If it is higher, no parameter
+will fix it — the value is hardcoded in the driver's `set_min_distance()` call
+in `src/drivers/distance_sensor/tfmini/` — so patch the firmware or the sensor
+is blind exactly when the vehicle is on the ground.
+
+`offboard_takeoff` deliberately does **not** gate on the published
+`min_distance` or on `signal_quality == 0`, so the node will use good
+sub-minimum readings even when the driver disparages them. EKF2 will still
+refuse to fuse them, and the node blocks arming on that (`cs_rng_kin_consistent`
+false), so a wrong `min_distance` shows up as a refusal to arm rather than as a
+phantom climb.
 | **`EKF2_EV_CTRL`** | **`0`** | **no external vision.** A leftover value from a VIO experiment leaves EKF2 waiting for vision that never comes |
 | `EKF2_MAG_TYPE` | `0` | magnetometer ON. This flight has no vision to supply heading |
 | `UXRCE_DDS_CFG` | your TELEM port | |
@@ -206,7 +239,7 @@ pkill -f realsense2_camera_node     # if one is stuck
 This is the whole camera side with **no agent and no flight node**.
 
 ```bash
-ros2 launch drone_testing window_scan.launch.py flight:=false
+p
 ```
 
 Watch the log. One line a second either way:
@@ -324,7 +357,7 @@ Terminal 2:
 
 ```bash
 ros2 topic list | grep /fmu/
-ros2 topic echo /fmu/out/vehicle_local_position_v1 --once
+ros2 topic echo /fmu/out/vehicle_local_position --once   # _v1 on some builds
 ```
 
 **Must be true, on the ground, props off:**
@@ -551,7 +584,7 @@ ros2 topic echo /takeoff_status         # STAGE|ARM|alt|xy-mode|detail
 http://<jetson-ip>:8080/
 
 # estimator health
-ros2 topic echo /fmu/out/vehicle_local_position_v1 --once
+ros2 topic echo /fmu/out/vehicle_local_position --once   # _v1 on some builds
 ros2 topic echo /fmu/out/estimator_status_flags --once | grep -E "cs_rng|cs_ev|cs_yaw"
 ```
 

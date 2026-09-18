@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: drone_testing
+Version: 0.0.0
+Summary: Pixhawk telemetry reader and offboard launch
+Maintainer: ark-jetson-orin
+Maintainer-email: ishan.aphanse2807@gmail.com
+License: TODO: License declaration
+Requires-Dist: setuptools
+Requires-Dist: pymavlink
+Provides-Extra: test
+Requires-Dist: pytest; extra == "test"
+Dynamic: license
+Dynamic: maintainer
+Dynamic: maintainer-email
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: summary

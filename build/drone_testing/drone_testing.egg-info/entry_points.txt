@@ -1,0 +1,25 @@
+[console_scripts]
+aruco_pose = drone_testing.aruco_pose:main
+bar_cross = drone_testing.bar_cross:main
+bar_detect = drone_testing.bar_detect:main
+cam = drone_testing.cam:main
+doll_detect = drone_testing.doll_detect:main
+fc_reboot = drone_testing.fc_reboot:main
+lcd_status = drone_testing.lcd_status:main
+offboard_mission = drone_testing.offboard_mission:main
+offboard_sequence = drone_testing.offboard_sequence:main
+offboard_sequence_vio = drone_testing.offboard_sequence_vio:main
+offboard_takeoff = drone_testing.offboard_takeoff:main
+offboard_translate = drone_testing.offboard_translate:main
+pixhawk_node = drone_testing.pixhawk_node:main
+precision_land = drone_testing.precision_land:main
+preflight_check = drone_testing.preflight_check:main
+qgc_doll_status = drone_testing.qgc_doll_status:main
+ring_detect = drone_testing.ring_detect:main
+ring_grab = drone_testing.ring_grab:main
+room_display = drone_testing.room_display:main
+window_detect = drone_testing.window_detect:main
+window_room_traverse = drone_testing.window_room_traverse:main
+window_scan = drone_testing.window_scan:main
+window_traverse = drone_testing.window_traverse:main
+zed_localization = drone_testing.zed_localization:main

@@ -3,10 +3,10 @@
 ROS 2 package for autonomous offboard flight on a PX4 vehicle, running on a
 Jetson companion computer.
 
-> **Humble or Jazzy?** This was written against Humble, and the commands below
-> still say `ros-humble-*`. The Jetson this was ported to (section 0) is
-> running **Jazzy**, and the package builds and runs there unchanged —
-> substitute `jazzy` for `humble` throughout. Nothing in the package pins a
+> **Humble or Jazzy?** This was written against Humble. **The Jetson it now
+> runs on is Jazzy** (`/opt/ros/jazzy`), and the package builds and runs there
+> unchanged — section 1 and section 2 say `jazzy`; anywhere further down that
+> still says `ros-humble-*`, substitute. Nothing in the package pins a
 > distro.
 
 Airframe this is written for: **Pixhawk 6C** (internal IMUs) + **PMW3901**
@@ -30,6 +30,13 @@ further: climb, then a list of motions — translations, altitude changes and ya
 — flown one at a time, then land (see section 6b). `precision_land` lands the
 vehicle on an ArUco marker seen by a downward camera, to within 15 cm (see
 section 6d).
+
+The competition mission is sections **6f** and **6g**: `window_traverse` finds
+a window with the D435i, lines up square in front of it and flies through;
+`window_room_traverse` carries on from there — around the dark room on the
+moves you give it, back to the window from the inside, out through it, and
+optionally running the TensorRT doll model the whole time and putting a live
+count in QGroundControl.
 
 ---
 
@@ -125,22 +132,138 @@ intrinsics come from `CameraInfo`, so resolution is not baked in anywhere.
 
 ### Workspace layout
 
+On **this** Jetson the workspace is `~/imav26-ws-2/ws_ros2`, not the
+`~/px4_ros_ws` the older commands below assume — substitute it throughout, or
+just `cd` to wherever your `src/` actually is:
+
 ```
-~/px4_ros_ws/
+~/imav26-ws-2/ws_ros2/
 └── src/
     ├── px4_msgs/                 # must match your PX4 firmware version
     ├── px4_ros_com/
-    └── offboard_imav26_test/     # this package (ROS package name: drone_testing)
+    ├── realsense-ros/            # built from source here, not from apt
+    ├── librealsense/
+    └── drone_testing/            # this package
 ```
 
 ### System packages
 
 ```bash
-sudo apt install ros-humble-desktop python3-colcon-common-extensions
-sudo apt install ros-humble-micro-ros-agent      # or build micro-XRCE-DDS-Agent from source
-sudo apt install ros-humble-realsense2-camera    # the D435i driver (section 0)
+sudo apt install ros-jazzy-desktop python3-colcon-common-extensions
+sudo apt install ros-jazzy-micro-ros-agent       # or build micro-XRCE-DDS-Agent from source
 pip3 install pyserial pymavlink
 ```
+
+`realsense2_camera` on this Jetson is **built from source** in the same
+workspace (`src/realsense-ros` over `src/librealsense`), not installed from
+apt — there is no `ros-jazzy-realsense2-camera` package in the index here.
+Check what you have with `ros2 pkg prefix realsense2_camera`.
+
+### The doll model's runtime (section 6g, rung 4 only)
+
+**This is installed and working on this Jetson.** It lives in a venv, not in
+the system or user site, and this section is the record of why and how — read
+it before you "fix" anything by pip-installing into the system Python.
+
+```bash
+/home/ark-jetson-orin-2/venvs/dolls/bin/python -c \
+    "import torch, ultralytics, tensorrt, cv2, numpy; print(torch.cuda.is_available())"
+# -> True
+```
+
+| piece | version |
+|---|---|
+| torch | 2.9.1+cu130 (CUDA 13.0 build, aarch64) |
+| torchvision | 0.24.1 |
+| ultralytics | **8.4.118** — pinned to the version `db.engine` was exported with |
+| lap | 0.5.13 — ByteTrack's linear assignment |
+| tensorrt / cv2 / numpy | 10.16.2.10 / 5.0.0 / 2.5.3, **inherited from the system** |
+
+#### Why a venv and not `pip install --user`
+
+Ubuntu 24.04 marks its Python externally managed (PEP 668), so a system or
+user install needs `--break-system-packages`. That is not a formality here:
+ultralytics declares `numpy>=1.23.0` and `opencv-python>=4.7.0`, and this
+machine's **numpy 2.5.3 and opencv-python 5.0.0.93 in `~/.local` are what the
+entire vision stack rides on**. Letting a resolver move either one changes
+`window_detect`, `doll_detect` and the RealSense path underneath you, and you
+find out in the air.
+
+That failure has already happened on this machine, twice over:
+
+- it is why `window_detect` hand-rolls `imgmsg_to_bgr()` in pure NumPy instead
+  of using `cv_bridge` — a pip-installed NumPy 2 made cv_bridge segfault on the
+  first frame;
+- and **the system Python on this Jetson cannot import matplotlib right now**
+  (`ImportError: numpy.core.multiarray failed to import`), because apt's
+  matplotlib 3.6.3 is built against NumPy 1.x and `~/.local` carries NumPy 2.
+  That breakage predates this venv and is untouched by it. The venv carries its
+  own matplotlib 3.11.2, which is why the doll node works despite it.
+
+The venv is created with **`--system-site-packages`**, so it *inherits* numpy,
+cv2 and tensorrt rather than duplicating them — there is exactly one of each on
+the path and nothing shadows the working install. pip inside it refuses to
+touch them: `Not uninstalling matplotlib at /usr/lib/python3/dist-packages,
+outside environment`. And it is reversible: `rm -rf ~/venvs/dolls` returns the
+machine to exactly where it was.
+
+#### How it was built, if you ever need to rebuild it
+
+```bash
+python3 -m venv --system-site-packages ~/venvs/dolls
+V=~/venvs/dolls/bin
+printf 'numpy==2.5.3\n' > /tmp/c.txt          # numpy may not move, ever
+
+$V/pip install --no-deps -c /tmp/c.txt ultralytics==8.4.118
+$V/pip install --no-deps \
+  https://download.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp312-cp312-manylinux_2_28_aarch64.whl
+$V/pip install --no-deps \
+  https://download.pytorch.org/whl/cu130/torchvision-0.24.1-cp312-cp312-manylinux_2_28_aarch64.whl
+$V/pip install -c /tmp/c.txt \
+  nvidia-cusparselt-cu13 nvidia-nccl-cu13 \
+  filelock typing-extensions "sympy>=1.13.3" networkx jinja2 fsspec \
+  polars nvidia-ml-py ultralytics-thop "lap>=0.5.12" "matplotlib>=3.9"
+```
+
+`--no-deps` on the first three is load-bearing: it is what stops pip from
+pulling its own numpy and opencv over the working ones.
+
+#### The one non-obvious thing: sm_87
+
+This is a **Jetson Orin Nano (`sm_87`)** on JetPack 7 / CUDA 13.2, and the
+official `cu130` aarch64 torch wheel is built for **sm_80, sm_90, sm_100,
+sm_110, sm_120 — there is no sm_87 in it**, and the only PTX it ships is
+`compute_120`, which cannot JIT down to 8.7:
+
+```
+-gencode;arch=compute_80,code=sm_80; ... ;-gencode;arch=compute_120,code=compute_120
+```
+
+It works anyway, because CUDA guarantees binary compatibility *upwards across
+minor versions within a major*: an `sm_80` cubin runs on an `sm_87` device.
+That was verified on this board before anything was installed, by compiling a
+kernel for `sm_80` only and running it:
+
+```bash
+nvcc -gencode arch=compute_80,code=sm_80 -o t t.cu && ./t   # -> OK
+```
+
+and confirmed afterwards in torch itself:
+
+```
+compiled arch list: ['sm_80', 'sm_90', 'sm_100', 'sm_110', 'sm_120', 'compute_120']
+device: Orin (8, 7)        cuda available: True        matmul on GPU OK
+```
+
+So **do not** go hunting for a "Jetson-specific" torch wheel because
+`get_arch_list()` has no `sm_87` in it. jetson-ai-lab has no JP7 stage, and
+NVIDIA's `redist/jp/v70` does not exist. This wheel is correct.
+
+The CUDA libraries themselves come from **JetPack**, not from pip, wherever
+possible: `ldconfig` already resolves `libcudart.so.13`, `libcublas.so.13`,
+`libcudnn.so.9`, `libcufft`, `libcurand`, `libcusparse`. Only `libcusparseLt`
+and `libnccl` were genuinely missing, which is why those two are installed
+explicitly above.
 
 ### Serial port permissions
 
@@ -170,8 +293,8 @@ uXRCE-DDS client at a matching baud rate (921600 here):
 ## 2. Build
 
 ```bash
-cd ~/px4_ros_ws
-source /opt/ros/humble/setup.bash
+cd ~/imav26-ws-2/ws_ros2
+source /opt/ros/jazzy/setup.bash
 colcon build --packages-select drone_testing
 source install/setup.bash
 ```
@@ -182,15 +305,16 @@ source install/setup.bash
 > already hit it:
 >
 > ```bash
-> rm -rf ~/px4_ros_ws/build/drone_testing ~/px4_ros_ws/install/drone_testing
+> rm -rf ~/imav26-ws-2/ws_ros2/build/drone_testing \
+>        ~/imav26-ws-2/ws_ros2/install/drone_testing
 > colcon build --packages-select drone_testing
 > ```
 
 Add the sourcing to your shell so every new terminal has it:
 
 ```bash
-echo 'source /opt/ros/humble/setup.bash' >> ~/.bashrc
-echo 'source ~/px4_ros_ws/install/setup.bash' >> ~/.bashrc
+echo 'source /opt/ros/jazzy/setup.bash' >> ~/.bashrc
+echo 'source ~/imav26-ws-2/ws_ros2/install/setup.bash' >> ~/.bashrc
 ```
 
 ---
@@ -209,8 +333,8 @@ ros2 launch drone_testing takeoff_test.launch.py
 
 ```bash
 ros2 topic list | grep /fmu/
-ros2 topic echo /fmu/out/vehicle_status_v1 --once
-ros2 topic echo /fmu/out/vehicle_local_position_v1 --once
+ros2 topic echo /fmu/out/vehicle_status_v1 --once   # unversioned on some builds
+ros2 topic echo /fmu/out/vehicle_local_position --once
 ```
 
 In that last message you want to see, **props off, on the ground**:
@@ -1498,6 +1622,596 @@ again.
 
 ---
 
+## 6g. Into the dark room, around it, and back out (`window_room_traverse`)
+
+Section 6f ends on the far side of the window. This is the rest of the
+competition run: **fly in through the window, move around inside the room on
+the moves you give, find the window again from the inside, and fly back out** —
+optionally running the doll model the whole time it is in there and putting a
+live count in QGroundControl.
+
+It is all **one node and one launch file**. The four missions below differ only
+in arguments, and they are a ladder: each rung is one strictly larger
+commitment than the last, and each one lands safely on its own. Fly them in
+order.
+
+| # | mission | what is new | command |
+|---|---|---|---|
+| 1 | **traverse** | in through the window, hold, land on the far side | section 6f, `window_traverse` |
+| 2 | **in and around** | the room moves you type, then land **inside** | `return_through_window:=false dolls:=false` |
+| 3 | **in, around, out** | find the window again from inside, fly back out, land | `return_through_window:=true dolls:=false` |
+| 4 | **the whole run** | the TensorRT doll model, geotagged count, live to QGC | `dolls:=true qgc:=true` |
+
+Everything about the traversal itself is section 6f's, unchanged.
+`window_room_traverse` is a subclass of `window_traverse` and nothing else: the
+sweep, the lock, the pose estimator, `RECENTRE`/`AIM`/`ALIGN`/`TRAVERSE`/`CLEAR`,
+the airframe clearance arithmetic, the yaw cone, the blind-traverse fallback
+and every PX4 gate come straight from the node that has actually flown. **Read
+6f first.** Nothing it says is repeated here.
+
+---
+
+### The three new nodes
+
+| node | what it does |
+|---|---|
+| `window_room_traverse` | the flight. `WindowTraverse` plus the room pattern (`ROOM_MOVE` / `ROOM_TURN` / `ROOM_HOLD`) and `RELOCK`, which throws away everything the estimator believes about the first window so the same approach stages can run a second time from the far side of it |
+| `doll_detect` | the TensorRT engine from `Downloads/DroneImpl_v7`, run through Ultralytics with ByteTrack, counting dolls by **where they are in the room** rather than by track id. Gated on `/doll_detect_enable` |
+| `qgc_doll_status` | speaks MAVLink straight to QGC over WiFi and puts the count in the message panel and in MAVLink Inspector. Does not touch PX4 or the flight |
+
+`room_display` (the Arduino TFT) is started too, if you have the board. It
+needs `arduino/room_status/room_status.ino` flashed — **not** the older
+`tft_status.ino` from section 7; the two sketches take different protocols and
+`lcd:=true` is pinned off in this launch file so they cannot fight over the
+same serial port.
+
+---
+
+### The flight, in order
+
+```
+climb -> hold -> find the window -> LOCK -> AIM -> ALIGN -> TRAVERSE
+      -> CLEAR              (the hold inside the room, clear_seconds)
+      -> ROOM_MOVE / ROOM_TURN / ROOM_HOLD, one step at a time, your list
+      -> RELOCK -> AIM -> ALIGN -> TRAVERSE (back out) -> CLEAR -> land
+```
+
+`CLEAR` is the inherited stage from 6f and it does double duty here: on the way
+in it is the settle inside the room, and when its `clear_seconds` are up it
+starts the room moves instead of landing. On the way out it is 6f's ending,
+unchanged.
+
+| stage | what happens | how it ends |
+|---|---|---|
+| … 6f's stages … | identical, to `inside_distance` (1.20 m) past the window plane | as 6f |
+| `ROOM_MOVE` | one translation leg, in the **current heading frame**, on the inherited carrot | inside `MOVE_TOLERANCE` and settled, or `room_move_timeout` |
+| `ROOM_TURN` | one yaw on the spot, ramped at `yaw_rate` | inside tolerance, or `room_turn_timeout` |
+| `ROOM_HOLD` | `room_hold_seconds` of settling between legs | the clock |
+| `RELOCK` | stationary, facing the wall, **rebuilding the window pose from nothing** | `pose_min_samples` accepted samples, or `relock_timeout` → land inside |
+| `AIM` … `CLEAR` | 6f's approach and traversal again, outbound to `outside_distance` | as 6f |
+
+Each room leg is flown and then **settled** before the next starts, for the
+same reason section 6b gives: otherwise step *n+1* samples its start point
+while the vehicle is still overshooting step *n*, and the errors compound down
+the pattern instead of each step correcting from where the last one really
+finished.
+
+---
+
+### The moves you give (`room_sequence`)
+
+The in-room moves are a string, in **exactly the grammar `offboard_sequence`
+takes** (section 6b) — comma-separated items, each a name and a number
+separated by a space, a colon or an `=`:
+
+```bash
+ros2 run drone_testing window_room_traverse --ros-args \
+    -p room_sequence:="forward 0.5, yaw 90, left 0.3, backward 0.4, yaw 90"
+```
+
+or as a launch argument, which is the same string:
+
+```bash
+ros2 launch drone_testing window_room_traverse.launch.py \
+    room_sequence:="forward 0.5, yaw 90, left 0.3, backward 0.4, yaw 90"
+```
+
+| step | units | what it does |
+|---|---|---|
+| `forward` / `backward` / `left` / `right` | metres | translation |
+| `yaw` | degrees | rotate in place, **`+` = to the right**, clockwise seen from above |
+
+`up` and `down` are **rejected**, and the node refuses to start rather than
+ignoring them: the room stages dispatch only to a move handler and a turn
+handler, there is no altitude handler among them, and an altitude change inside
+the room is really a change to the height the return approach lines up at —
+which is what `altitude_offset` is for. A malformed string is likewise fatal at
+startup, exactly as in 6b: a typo here is a typo in a flight plan and must not
+be quietly guessed at.
+
+```
+room_sequence: 'up' is not a room move; only forward/backward/left/right/yaw
+are flown inside the room (use altitude_offset to change the height the
+traversal is flown at)
+```
+
+**The frame is the current heading, not the takeoff heading.** This is the
+opposite of section 6b's default and it is deliberate: one reference yaw is
+sampled when each step *starts*, so "forward" after a `yaw 90` means along the
+**new** heading. That is what makes a list of moves a box rather than a
+dog-leg.
+
+**Leave `room_sequence` empty and you get the six-leg box** the node was
+written around, built from its own parameters — 0.30 m left, 0.30 m forward,
+90° right, 0.30 m on, 90° right, 0.30 m on. Nothing that already flies changes.
+The whole plan is printed once at startup, whichever form you used, and that
+line is the thing to read back before you arm:
+
+```
+ROOM MISSION: through the window and 1.20 m in, then 0.50 m forward,
+yaw +90 deg, 0.30 m left, 0.40 m backward, then find the window again and fly
+back out 1.20 m, then land. Doll detection runs from the inbound commit to the
+outbound clear. Hard clock 300 s.
+```
+
+#### The one constraint your list must satisfy
+
+**`RELOCK` does not sweep.** It stands still facing wherever your list left the
+nose and rebuilds the pose from there. So on rung 3 and rung 4 the moves must
+end with **the window in frame** — with the defaults, two 90° right turns leave
+the nose 180° from the entry heading, i.e. pointing back at the wall it came
+through, and that is the geometry `RELOCK` needs. Change the turns and you
+change that.
+
+Check it without flying: stand where your list ends, facing where it ends up
+facing, and look at `/window_detected`. If the answer is no, the aircraft will
+sit there for `relock_timeout` (45 s) and then land in the room. That is a
+survivable outcome, not a crash, but it is not the mission.
+
+---
+
+### Why the estimator is cleared and the cone moved on the way out
+
+Three things are genuinely different about the second approach, and all three
+are about the same fact: the aircraft is now on the other side of the window
+and pointing roughly backwards.
+
+1. **The pose estimate is thrown away at `RELOCK`.** Not an optimisation — the
+   estimator's innovation gate refuses any sample whose normal has swung more
+   than `gate_yaw_deg` from what it already believes, and the normal is always
+   resolved to point back at the aircraft. From inside the room the same
+   physical window produces a normal 180° from the one on file, so **every**
+   return sample would be gated out as "normal swung". Clearing the buffer is
+   what makes the second approach possible at all.
+
+2. **The yaw cone is re-centred.** `window_traverse` refuses to believe in, or
+   turn towards, anything more than `yaw_cone_deg` off the heading it *armed*
+   on. That is the right rule going in and exactly backwards coming out. The
+   cone is kept, at the same width; only its centre moves, to the heading the
+   aircraft holds at the end of your room moves. The return leg is still
+   protected against locking onto a doorway behind it — it is just protected
+   about the right axis.
+
+3. **`exit_distance` is two numbers.** The inbound run ends
+   `inside_distance` (1.20 m) past the plane, the outbound run
+   `outside_distance` (1.20 m). The inherited code reads one parameter; the
+   subclass points it at the inbound number and swaps it at `RELOCK`, so
+   nothing else has to know there are two.
+
+---
+
+### The room has to fit, and it is deeper than you think
+
+The return approach flies to the **standoff point**, which is
+`standoff_distance` (2.0 m, and further if the window is large — see
+`effective_standoff` in 6f) *in front of* the window on its axis, i.e. **inside
+the room**. So the room must be at least `standoff_distance` plus the airframe
+deep, measured from the window wall — not merely deep enough for your moves.
+Pace it out with the props off.
+
+A room that cannot give that depth needs `standoff_distance` lowered, and
+lowering it costs the return approach its view of the whole window. That is the
+trade `return_through_window:=false` exists for: fly in, do the moves, land
+inside. **That is rung 2, and it is the right first flight in any new room** —
+whether the pattern fits is a separate question from whether it can be
+reversed, and asking them one at a time is how you get an airframe back.
+
+---
+
+### The doll count (rung 4)
+
+#### The model, and where its runtime lives
+
+`db.engine` is a **YOLO26n** TensorRT engine, one class (`dolls`), exported
+with **Ultralytics 8.4.118** on 2026-09-03, FP16, `imgsz` **1280x1280**, batch
+1, and `end2end: True` — NMS is inside the engine, so its output is a fixed
+`(1, 300, 6)` and nothing downstream runs NMS.
+
+All of that is readable off the file itself, because an Ultralytics-exported
+`.engine` is **not** a bare TensorRT engine: it is a 4-byte little-endian
+length, then that many bytes of JSON metadata, then the serialized engine.
+Worth knowing, because feeding the whole file to
+`IRuntime::deserializeCudaEngine` fails with
+
+```
+Serialization assertion header.magicTag == kEXPECTED_MAGIC_TAG failed.
+Trying to load an engine created with incompatible serialization version
+(556 != 1953657958)
+```
+
+which reads like a version mismatch and **is not one** — 556 is just the JSON
+length. Ultralytics skips the header for you. To check the engine by hand:
+
+```python
+import json, tensorrt as trt
+data = open('db.engine','rb').read()
+n = int.from_bytes(data[:4], 'little')
+print(json.loads(data[4:4+n]))                      # the metadata
+eng = trt.Runtime(trt.Logger()).deserialize_cuda_engine(data[4+n:])
+```
+
+The engine loads and runs on this Jetson: ~20–40 ms a frame, comfortably
+inside `doll_max_fps` (6.0). TensorRT does log one warning every time:
+
+```
+Using an engine plan file across different models of devices is not supported
+and is likely to affect performance or even cause errors or deadlock.
+```
+
+That is because the engine was built on a **different Jetson model** from this
+one. It deserializes and runs because both are `sm_87`, and it has been
+exercised here end to end. If you want the warning gone — or hit anything odd
+that smells like it — re-export on this board with the same Ultralytics
+version. That needs the original `.pt`, which is **not on this machine**: the
+only model artefact here is `db.engine` itself.
+
+torch and ultralytics live in a **venv** (`~/venvs/dolls`), not in the system
+Python, and the launch file puts it on `PYTHONPATH` for the doll node only.
+See [section 1](#the-doll-models-runtime-section-6g-rung-4-only) for what is
+installed, why it is not a system install, and the `sm_87` wrinkle. To run the
+node **by hand**, you have to supply that path yourself:
+
+```bash
+PYTHONPATH=/home/ark-jetson-orin-2/venvs/dolls/lib/python3.12/site-packages:$PYTHONPATH \
+  ros2 run drone_testing doll_detect --ros-args -p require_enable:=false
+```
+
+Forget it and the node starts, subscribes, and then logs
+`Cannot load …/db.engine: No module named 'ultralytics'` on the first frame —
+counting zero while the flight carries on unaffected, because nothing in the
+flight is gated on the detector.
+
+#### What a doll's identity is, and why it is not a track id
+
+`jw_px4_arduinocount.py` identified a doll by its position **in the image**: a
+ByteTrack id, plus a pixel-distance re-identification fallback for when the
+tracker dropped it. That is a perfectly good answer for a fixed camera. On a
+drone that yaws 90° twice it is not one — the same doll leaves the frame on one
+side and comes back at a completely different pixel, and every time it does,
+the old logic mints a new doll.
+
+`doll_detect` identifies a doll by **where it is in the room**. Every detection
+is projected out of the camera, through the airframe, into the PX4 local NED
+frame, and lands on an existing doll if it is within `doll_merge_radius` of it.
+The track id is still there — it is what makes consecutive frames cheap and
+what the confirmation counter counts — but it is not the identity. Turn the
+aircraft round twice and fly back past the same doll and it is still doll #3,
+because it is still in the same corner of the room.
+
+That is what the id *is*, and it is published as one: `/doll_report` carries
+`id x y z` for every doll counted, in metres NED relative to the arming point,
+so the count can be checked against the room afterwards instead of taken on
+trust.
+
+#### How a pixel becomes a room position
+
+The same three transforms `window_traverse` uses for the window, with the
+**same camera mounting parameter names**, so one launch file sets both:
+
+```
+pixel + depth  -> camera frame   (pinhole intrinsics from CameraInfo)
+camera frame   -> body FRD       (cam_x/y/z, cam_roll/pitch/yaw)
+body FRD       -> local NED      (VehicleAttitude quaternion + position)
+```
+
+Depth is the aligned depth image, median-sampled over the middle
+`doll_depth_patch` (30%) of the box, exactly the way `window_detect` samples a
+window corner, so one dead pixel does not place a doll on the far wall. **A box
+with no usable depth is dropped, not guessed.** A doll at an assumed range
+lands somewhere arbitrary in NED, and that is the one input that could actually
+corrupt the count. It is still published as *visible*; it just cannot be
+*counted*.
+
+#### When the model runs
+
+Gated on `/doll_detect_enable`, which the flight node publishes: **true from
+the moment it commits to the inbound traverse, false once it is clear of the
+window on the way back out.** That is the window of the flight the dolls can
+possibly be in, and running the model outside it is Jetson time spent on the
+wall — on a machine sharing a USB3 bus and a GPU with the RealSense and the
+window detector, that matters. The topic is republished every tick rather than
+on the edge, so a detector that starts late still gets told to run.
+
+`require_enable:=false` runs it free, on the ground included. That is how you
+bench the model and the geotagging without flying.
+
+#### Topics
+
+| topic | type | what |
+|---|---|---|
+| `/doll_count` | `Int32` | cumulative, never decreases |
+| `/dolls_visible` | `Int32` | this frame |
+| `/doll_report` | `String` | `n\|id:x,y,z\|id:x,y,z\|…` in NED |
+| `/doll_image` | `Image` | annotated (`doll_publish_image:=true` only) |
+| `/doll_detect_enable` | `Bool` | from the flight node |
+| `/mission_phase` | `String` | `PHASE\|STAGE\|detail`, what the TFT shows |
+
+Phases, in order: `OUTSIDE` → `SEARCH` → `WINDOW_IN` → `ENTERING` →
+`INSIDE` → `ROOM` → `SEARCH_OUT` → `WINDOW_OUT` → `EXITING` → `OUT` →
+`LANDING`. They are derived from the stage every tick rather than stored, so
+the label cannot drift out of step with what the aircraft is actually doing.
+
+#### Getting the count into QGroundControl
+
+`/dev/ttyTHS1` on this Jetson is the uXRCE-DDS link to PX4, so there is no
+spare MAVLink serial port to the flight controller, and PX4 has no uORB topic
+in the default `dds_topics.yaml` that comes out of the other end as
+`STATUSTEXT`. So `qgc_doll_status` **does not go through PX4 at all**. It
+speaks MAVLink straight to QGC over the WiFi the Jetson is already on, as an
+extra *component* of the same vehicle — `source_system` = the vehicle's
+`MAV_SYS_ID` (1), `source_component` = 191 (`MAV_COMP_ID_ONBOARD_COMPUTER`) —
+so QGC files everything under the aircraft it is already showing instead of
+popping up a second vehicle.
+
+What then appears in QGC:
+
+| message | where you see it |
+|---|---|
+| `STATUSTEXT` `"DOLLS 3 (now 1)"` | the message panel at the bottom, and spoken aloud if audio is on. Sent when the total changes, and repeated periodically so a GCS that connected late still learns the count |
+| `NAMED_VALUE_INT` `dolls`, `dolls_now` | MAVLink Inspector, live — and plottable in Analyze, which is how you **watch the count climb during the run** rather than reading a log afterwards |
+| `STATUSTEXT`, once at the end | the per-doll NED positions from `/doll_report`, one line per doll, sent when the phase reaches `DONE`/`LANDING`, so the result is in the QGC log |
+
+Addressing: `qgc_host` defaults to `255.255.255.255`, i.e. broadcast on the
+subnet, which finds QGC without anyone typing an IP — both are on the same
+WiFi. Point it at the laptop's address if broadcast is filtered. If QGC is
+reached over a telemetry radio instead of WiFi, this node cannot help; that
+case needs `MAV_*_FORWARD` on the FC and a serial port this Jetson does not
+have free.
+
+Nothing here touches the flight. If the socket cannot be opened, or QGC is not
+there, it logs once and keeps counting quietly.
+
+---
+
+### Running it
+
+`agent_only` defaults to **true**, as in every other launch file here: the
+launch brings up the support stack — agent, RealSense, `window_detect`,
+`doll_detect`, `qgc_doll_status`, the TFT — and you run the flight node by hand
+in a second pane, which is what keeps stdin a tty and the `q` / `k` aborts
+alive.
+
+**Bench, no props, no agent, no flight node** — camera and window detector
+only, so you can check the detection and walk the window estimate by hand:
+
+```bash
+ros2 launch drone_testing window_room_traverse.launch.py flight:=false
+ros2 topic echo /window_detected
+ros2 topic echo /window_pose
+```
+
+`flight:=false` suppresses the **doll node too** — it is grouped with the
+flight node, on the same startup delay. To bench the model and the geotagging
+against that camera, start it yourself in a third pane, ungated:
+
+```bash
+PYTHONPATH=/home/ark-jetson-orin-2/venvs/dolls/lib/python3.12/site-packages:$PYTHONPATH \
+  ros2 run drone_testing doll_detect --ros-args \
+    -p require_enable:=false -p publish_image:=true \
+    -p cam_x:=0.105 -p cam_z:=-0.04
+ros2 topic echo /doll_count
+ros2 topic echo /doll_report
+```
+
+The `PYTHONPATH` prefix is not optional for a hand-started node — the launch
+file sets it via `doll_venv`, `ros2 run` does not.
+
+The geotag needs `/fmu/out/vehicle_local_position` and
+`/fmu/out/vehicle_attitude`, so with no agent running it will detect and report
+dolls as *visible* but count none. To bench the count, use the default
+`agent_only:=true` launch (which does start the agent) with
+`dolls:=true require_enable:=false`, and carry the airframe around the room by
+hand with the props off.
+
+**Rung 2 — in, your moves, land inside:**
+
+```bash
+# pane 1
+ros2 launch drone_testing window_room_traverse.launch.py \
+    dolls:=false return_through_window:=false \
+    cam_x:=0.105 cam_z:=-0.04
+
+# pane 2
+ros2 run drone_testing window_room_traverse --ros-args \
+    -p takeoff_altitude:=1.2 \
+    -p return_through_window:=false \
+    -p room_sequence:="forward 0.5, yaw 90, left 0.3" \
+    -p cam_x:=0.105 -p cam_z:=-0.04
+```
+
+**Rung 3 — and back out through the window:**
+
+```bash
+ros2 run drone_testing window_room_traverse --ros-args \
+    -p takeoff_altitude:=1.2 \
+    -p room_sequence:="forward 0.3, yaw 90, forward 0.3, yaw 90, forward 0.3" \
+    -p cam_x:=0.105 -p cam_z:=-0.04
+```
+
+**Rung 4 — the whole run, with the count in QGC:**
+
+```bash
+ros2 launch drone_testing window_room_traverse.launch.py \
+    dolls:=true qgc:=true qgc_host:=192.168.1.42 \
+    room_sequence:="forward 0.3, yaw 90, forward 0.3, yaw 90, forward 0.3"
+
+ros2 run drone_testing window_room_traverse --ros-args \
+    -p takeoff_altitude:=1.2 \
+    -p room_sequence:="forward 0.3, yaw 90, forward 0.3, yaw 90, forward 0.3"
+```
+
+> **The room moves must be given to the node you actually run.** Started by
+> hand with `ros2 run`, the flight node takes `room_sequence` from *its own*
+> `--ros-args`, not from the launch file's argument — the launch file's copy
+> only reaches the flight node it starts itself (`agent_only:=false`). Pass the
+> same string to both, or run with `agent_only:=false` and accept losing the
+> keyboard aborts.
+
+Everything in one shot, no keyboard abort (the RC kill switch still works, and
+it is the one that matters):
+
+```bash
+ros2 launch drone_testing window_room_traverse.launch.py agent_only:=false \
+    room_sequence:="forward 0.5, yaw 90, left 0.3"
+```
+
+Useful variations:
+
+| argument | effect |
+|---|---|
+| `return_through_window:=false` | fly in, do the moves, land inside. **Rung 2** |
+| `dolls:=false` | no model at all. Rungs 2 and 3 |
+| `require_enable:=false` | run the model the whole time, ground included — how you bench it |
+| `qgc:=false` | no MAVLink to QGC |
+| `display:=false` | no Arduino |
+| `camera:=false` | the RealSense is already running from another stack; do not start a second copy (librealsense refuses the device rather than sharing it, and the failure looks like a dead camera) |
+| `flight:=false` | camera and window detector only: the bench test. **Suppresses the doll node as well** — it is grouped with the flight node |
+
+---
+
+### A dark room, specifically
+
+Two different sensors, and only one of them cares that the lights are off.
+
+- **Depth does not need light.** The D435i projects its own IR pattern, and
+  `emitter:=1` (the default) keeps it on. So the window's corner depths, the
+  pose estimate, and every doll's range keep working in the dark.
+- **Everything else is the colour image, and that does need light.**
+  `window_detect` is an HSV threshold — it finds the window by its *colour*
+  (`color:=blue` is the default here) — and `doll_detect` runs the model on the
+  same colour frame. A room dark enough to starve the RGB sensor gives you a
+  detector that never latches and a model that sees nothing, with depth working
+  perfectly the whole time.
+
+So the thing to check in the actual arena, before flying it, is
+`/window_detection/image` (in a browser at `http://<jetson-ip>:8080/`, no ROS
+needed on the viewing machine) with the room lit the way it will be on the day.
+The window frame is usually the lit part — it is a hole into a brighter space —
+which is what makes this work at all; the dolls are not.
+
+`window_detect_darkroom.py` exists in the package and is **not** wired into
+`setup.py`, so there is no `ros2 run` entry point for it. It is an older
+ZED-topic copy of the detector, kept for reference. Do not reach for it
+expecting a low-light mode.
+
+---
+
+### Parameters
+
+On top of everything 6c and 6f take:
+
+| parameter | default | what |
+|---|---|---|
+| `room_sequence` | *(empty)* | the in-room moves, 6b's grammar. Empty = the six-leg box below |
+| `room_strafe` | 0.30 | m left — first leg of the default box |
+| `room_forward_1` | 0.30 | m forward |
+| `room_turn_1_deg` | 90.0 | deg right |
+| `room_forward_2` | 0.30 | m on the new heading |
+| `room_turn_2_deg` | 90.0 | deg right |
+| `room_forward_3` | 0.30 | m on again |
+| `room_speed` | 0.20 | m/s for the room legs. Slow: they are short, and this is also the speed the doll detector sees the room at |
+| `room_hold_seconds` | 2.0 | s of settling between legs |
+| `room_move_timeout` | 20.0 | s for one leg |
+| `room_turn_timeout` | 25.0 | s for one turn |
+| `return_through_window` | true | false = land inside (rung 2) |
+| `inside_distance` | 1.20 | m past the plane the inbound run ends |
+| `outside_distance` | 1.20 | m past the plane the outbound run ends |
+| `relock_timeout` | 45.0 | s standing still looking at the wall before giving up and landing inside. Generous — it is the one stage with nothing to fall back on |
+| `relock_settle_seconds` | 2.0 | s of holding still before the new estimate is believed at all. The moves end with a turn, and a turn smears both the flow and the depth |
+| `flight_seconds` | 300.0 | hard clock from the start of the climb. Two traversals, the moves and two lots of settling do not fit in 6f's 150 s |
+
+`doll_detect`. The **launch arguments** are the `doll_`-prefixed names below;
+the node's own parameters, if you run it by hand with `ros2 run`, drop the
+prefix (`model_path`, `tracker_path`, `confidence`, `min_frames_to_confirm`, `max_fps`,
+`merge_radius`, `depth_min`, `depth_max`, `depth_patch`, `min_depth_pixels`,
+`publish_image`).
+
+| parameter | default | what |
+|---|---|---|
+| `doll_model` | `~/Downloads/DroneImpl_v7/db.engine` | the TensorRT engine. **Built for this Jetson and this TensorRT version** — an engine copied from another machine will not load |
+| `doll_tracker` | `~/Downloads/DroneImpl_v7/custom_bytetrack.yaml` | ByteTrack config: `track_buffer: 500` is the important line — a doll that leaves the frame during a 90° turn keeps its track |
+| `doll_confidence` | 0.55 | the same gate as the standalone script |
+| `doll_min_frames` | 5 | frames a track must survive before it may create or join a doll. Kills single-frame false positives before they reach the geotagger |
+| `doll_max_fps` | 6.0 | cap. The model is not the expensive thing here — the flight node's setpoint timer is what must not be starved, and a doll does not move |
+| `doll_merge_radius` | 0.60 | m. Two detections closer than this **are** the same doll. Must be comfortably smaller than the smallest gap between two real dolls and comfortably bigger than the position error. **Measure the gap in your arena** |
+| `doll_depth_min` / `doll_depth_max` | 0.30 / 8.0 | m. Closer is the airframe; further is the far wall showing through a box |
+| `doll_depth_patch` | 0.30 | fraction of the box side the depth median is taken over. The middle 30% of a doll is doll; the edges are the floor behind it |
+| `doll_min_depth_pixels` | 12 | valid depth samples needed in that patch |
+| `doll_publish_image` | false | publish the annotated frame |
+| `require_enable` | true | false = run the model regardless of the flight phase |
+| `doll_venv` | `~/venvs/dolls/lib/python3.12/site-packages` | prepended to `PYTHONPATH` **for the doll node only**, so the plain `doll_detect` entry point can import torch and ultralytics. A path that does not exist is ignored by Python |
+
+`qgc_doll_status`: `qgc_host` (`255.255.255.255`), `qgc_port` (14550),
+`qgc_sysid` (1, must match the vehicle's `MAV_SYS_ID`).
+
+---
+
+### Before the first flight
+
+Everything section 6f's checklist says still applies — the camera mounting
+measurement, walking the window estimate with the props off, the flow health
+check. In addition:
+
+1. **The camera mounting is shared.** `cam_x/cam_y/cam_z/cam_roll/cam_pitch/cam_yaw`
+   go to **both** the flight node and the doll node, in the ROS convention
+   (x forward, y **left**, z **up**). Get them wrong and the window is
+   misplaced by the offset *and* every doll is — which merges dolls that are
+   not the same one, and the count comes out low with no sign that anything
+   went wrong.
+2. **Pace out the room against `standoff_distance`,** not against your moves.
+   See above.
+3. **Stand where your moves end, facing where they end, and check
+   `/window_detected`.** `RELOCK` does not sweep.
+4. **Set `doll_merge_radius` from the real doll spacing.**
+5. **Fly rung 2 first in any new room.** Then 3. Then 4.
+
+### Status output
+
+Same `/takeoff_status` topic and format as every other node here, so the
+display works unchanged. The detail field carries the leg counter:
+`2/5 for0.32` (leg 2 of 5, 0.32 m to go), `3/5 yaw42`, `4/5 2s` (settling),
+`relock 12s`.
+
+`/mission_phase` carries `PHASE|STAGE|detail` for the TFT and anything else
+that wants to know which side of the wall the aircraft is on.
+
+### When it gives up
+
+Same rule as 6f, at both ends: an abandoned approach **lands**, it does not
+retry. A failed `RELOCK` lands *inside the room* — which is the correct
+outcome, because the alternative is an aircraft with an unknown amount of
+battery flying at a wall it cannot find a hole in. A room leg that times out or
+loses the flow is reported and the pattern **carries on**, exactly as in 6b,
+because the next leg may not depend on whatever failed. The per-leg results are
+printed as one line at the end of the flight:
+
+```
+Room mission: inbound done; room forward 0.50 -> done, 0.48 m of 0.50 m;
+yaw 1.57 -> done; left 0.30 -> TIMED OUT 0.11 m short; outbound done.
+```
+
+---
+
 ## 7. Optional: LCD status display
 
 An Arduino running `arduino/tft_status/tft_status.ino` shows the stage, arm
@@ -1517,7 +2231,7 @@ Disable it with `lcd:=false`.
 plus the takeoff node waiting for your Offboard switch.
 
 ```bash
-sudo cp ~/px4_ros_ws/src/offboard_imav26_test/drone_testing/px4-agent.service \
+sudo cp ~/imav26-ws-2/ws_ros2/src/drone_testing/drone_testing/px4-agent.service \
         /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now px4-agent.service
@@ -1555,13 +2269,17 @@ sudo systemctl daemon-reload && sudo systemctl restart px4-agent.service
 | `offboard_translate` | takeoff, then a 1 m horizontal move, then land (section 6)      |
 | `offboard_sequence` | takeoff, then a list of moves / climbs / yaws, then land (section 6b) |
 | `offboard_mission` | multi-waypoint offboard mission                                   |
-| `zed_localization` | feeds ZED visual odometry into PX4 as `vehicle_visual_odometry`   |
+| `zed_localization` | feeds ZED visual odometry into PX4 as `vehicle_visual_odometry`. **Not used on this airframe** — there is no ZED and no external vision; see sections 0 and 6e |
 | `lcd_status`       | drives the Arduino status display                                 |
 | `pixhawk_node`     | MAVLink telemetry reader                                          |
 | `cam`              | camera capture helper                                             |
 | `window_detect`    | RealSense D435i window detection, publishes `/window_detected` and `/window_geometry` (sections 6c, 6f) |
 | `window_scan`      | takeoff, yaw sweep, lock onto the window, land after 40 s (section 6c) |
 | `window_traverse`  | takeoff, sweep, estimate the window's pose, line up and fly through it (section 6f) |
+| `window_room_traverse` | 6f, then the room moves you give, then find the window again from inside and fly back out (section 6g) |
+| `doll_detect`      | the TensorRT doll model + ByteTrack, counting dolls by their position in the room; publishes `/doll_count`, `/dolls_visible`, `/doll_report` (section 6g) |
+| `qgc_doll_status`  | puts the live doll count in QGroundControl over MAVLink/UDP, bypassing PX4 entirely (section 6g) |
+| `room_display`     | drives the `room_status.ino` Arduino TFT from `/mission_phase` and the doll topics (section 6g) |
 | `aruco_pose`       | down-camera ArUco pose, publishes `/aruco/detected` and `/aruco/point` (section 6d) |
 | `precision_land`   | takeoff, find the marker, centre on it, land on it (section 6d)   |
 
@@ -1571,6 +2289,7 @@ Other launch files:
 - `sequence_test.launch.py` — agent + `offboard_sequence` (section 6b)
 - `window_scan.launch.py` — agent + RealSense D435i + `window_detect` + `window_scan` (section 6c)
 - `window_traverse.launch.py` — agent + RealSense D435i + `window_detect` + `window_traverse` (section 6f)
+- `window_room_traverse.launch.py` — includes the above for the support stack, and adds `window_room_traverse` + `doll_detect` + `qgc_doll_status` + `room_display` (section 6g)
 - `precision_land.launch.py` — agent + `aruco_pose` + `precision_land` (section 6d)
 - `arm_test.launch.py` — agent + `offboard_mission`, for arm/disarm bench tests
 - `offboard_launch.launch.py` — agent + ZED localization + `offboard_mission`
@@ -1600,6 +2319,18 @@ Other launch files:
 | `window_traverse` never leaves `LOCK` | No usable window pose. The node logs which test is rejecting the samples — read that tally. Usual causes: `camera_info_topic` wrong (the log says it is guessing the FOV), the depth map has holes where the frame is (`corner depth missing`), or the sample boxes are landing on the wall behind it (`corner depths disagree` / `corners not coplanar`). |
 | `/window_pose` centre wanders as you move the airframe | The estimate is not being placed correctly in NED. Check `cam_roll/cam_pitch/cam_yaw` and the lever arm — they must be measured to the D435i's left imager — and that `/fmu/out/vehicle_attitude` is actually in the PX4 DDS topic list. |
 | `Traverse abandoned: could not settle on the approach point` | VO noise is larger than `align_tolerance`, or the estimate is still moving. Loosen `align_tolerance`, or raise `pose_min_samples` / `buffer_seconds` so the target stops shifting under the aircraft. |
+| `window_room_traverse` never leaves `RELOCK`, then lands inside | The window is not in frame from where your moves left the nose. `RELOCK` does not sweep. Stand where the moves end, face where they end, and check `/window_detected` — then fix the last `yaw` in `room_sequence`, not the timeout. |
+| The return approach backs into a wall, or `ALIGN` times out on the way out | The room is shallower than `standoff_distance` (2.0 m, more for a large window) measured from the window wall. That point is *inside* the room. Lower `standoff_distance`, or fly `return_through_window:=false` and land inside. |
+| `room_sequence: unknown motion '…'` and the node exits | A typo in the room moves. Only `forward`/`backward`/`left`/`right`/`yaw` are accepted; `up`/`down` are rejected on purpose (use `altitude_offset`). The node refuses to fly a plan other than the one you typed. |
+| A room leg reads `SKIPPED, flow never latched x/y` | The PMW3901 never gave a healthy horizontal estimate inside the room — dark floor, featureless floor, or too low. The turns still fly (gyro), the translations do not. This is the inherited rule from 6b: a move that cannot be measured is not flown. |
+| `Cannot load …/db.engine: No module named 'ultralytics'` | The node was started without the venv on `PYTHONPATH`. The launch file sets it (`doll_venv`); a bare `ros2 run` does not — prefix it yourself, see 6g. |
+| `Cannot load …/db.engine: …` anything else | The engine did not deserialize. Check it by hand with the metadata-header snippet in 6g; a raw `deserialize_cuda_engine` on the whole file **always** fails and is not evidence of a bad engine. |
+| `Using an engine plan file across different models of devices` | Expected, and not fatal: `db.engine` was built on a different Jetson model. Both are `sm_87`, and it runs. Re-export on this board to silence it — which needs the `.pt`, not present here. |
+| Doll count stays 0 while the model is loaded | No depth on the boxes (`N boxes dropped for no depth`) or no vehicle pose (`dropped for no pose`) — the per-second log line says which. Without the DDS agent there is no pose, so a bench run counts nothing by design. |
+| `torch` warns `sm_87 is not compatible` / `no kernel image` | See section 1: the wheel has no `sm_87`, runs on `sm_80` binary compatibility, and this is verified working. Do not swap the wheel on the strength of the warning alone — test `torch.cuda.is_available()` and a GPU matmul first. |
+| Doll count comes out low | `doll_merge_radius` (0.60 m) is larger than the real gap between dolls, so two dolls merge into one. Measure the spacing in your arena. Or the camera mounting is wrong, which displaces every doll by the same offset — it must match what the flight node has. |
+| Doll count comes out high | `doll_merge_radius` is smaller than the position error, so one doll splits in two. Raise it, or check the flow is not drifting: the geotag is only as good as the NED position under it. |
+| Nothing appears in QGC's message panel | `qgc_doll_status` is broadcasting to `255.255.255.255:14550` and the subnet is filtering it, or QGC is on a telemetry radio rather than the WiFi. Set `qgc_host` to the laptop's actual IP. Check `NAMED_VALUE_INT` `dolls` in MAVLink Inspector first — it is the same socket. |
 | Lands 30–40 cm off after a good alignment | Drift during the open-loop descent. Check `precision_descent` is true, and that the flow stays healthy (`flow_ok=True`) down to `FLOW_MIN_AGL`. |
 
 ---
@@ -1780,7 +2511,7 @@ after arming.
 3. `ros2 topic echo /fmu/out/estimator_status_flags --once` → `cs_rng_hgt` and
    `cs_rng_kin_consistent` both true, `cs_baro_hgt` is *not* carrying the
    height on its own.
-4. `ros2 topic echo /fmu/out/vehicle_local_position_v1 --once` → `z_valid` and
+4. `ros2 topic echo /fmu/out/vehicle_local_position --once` → `z_valid` and
    `dist_bottom_valid` both true.
 5. RC kill switch tested on the bench, this session.
 6. `takeoff_altitude` set low (0.30 m).
@@ -1792,3 +2523,14 @@ after arming.
 10. **Precision landing only:** `marker_id`, `marker_size` and `aruco_dict`
     match the marker actually laid out, and the marker is inside the capture
     basket for your `takeoff_altitude`.
+11. **Room mission only (6g):** the whole plan has been read back from the
+    `ROOM MISSION:` startup line and is the one you meant, the room is at
+    least `standoff_distance` deep from the window wall, and you have stood
+    where the moves end and confirmed `/window_detected` from there.
+12. **Room mission only:** `cam_x/cam_y/cam_z/cam_roll/cam_pitch/cam_yaw` are
+    the measured mounting and are the **same numbers** on the flight node and
+    the doll node.
+13. **Doll counting only:** the venv answers
+    `~/venvs/dolls/bin/python -c "import torch, ultralytics; print(torch.cuda.is_available())"`
+    with `True`, and the run log says `Doll model ready.` rather than
+    `Cannot load …` — or you have accepted that the count will be zero.

@@ -1,0 +1,11 @@
+# ros2 topic created:
+
+/fmu/in/offboard_control_mode
+/fmu/in/vehicle_command
+/fmu/in/vehicle_rates_setpoint
+/fmu/out/vehicle_local_position_v1
+/fmu/out/vehicle_status_v1
+/parameter_events
+/rosout
+
+
