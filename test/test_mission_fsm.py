@@ -336,13 +336,20 @@ def test_outbound_clear_flies_the_legs_home_instead_of_landing(fsm):
     assert fsm._phase_label() == 'OFF_AXIS', 'the mirror strafe, not the leg'
 
 
-def test_inbound_clear_still_starts_the_room_pattern(fsm):
+def test_inbound_clear_still_starts_the_room(fsm):
+    """Inbound CLEAR is the parent's, and it starts the room.
+
+    In lidar mode the room is the tile scan, and it is reached via the
+    altitude change that levels off at ROOM_ALTITUDE first.
+    """
+    fsm.home_z = 0.0
     fsm.phase = fsm.PHASE_IN
     fsm._enter_stage(fsm.CLEAR)
     expire(fsm)
     fsm._handle_clear()
 
-    assert fsm.current_stage in (fsm.ROOM_MOVE, fsm.ROOM_TURN)
+    assert fsm.current_stage == fsm.ALT_CHANGE
+    assert fsm.alt_next == 'room'
 
 
 # ---------------------------------------------------------------- centring
@@ -1125,3 +1132,186 @@ def test_the_real_window_leaves_a_workable_margin():
 
     # The vertical is not the binding constraint on this window.
     assert 0.5 * (0.60 - 0.260) > tightened, "height is generous; width binds"
+
+
+# ---------------------------------------------------- the lidar tile scan
+
+def test_the_room_defaults_to_the_lidar_tile_scan(fsm):
+    assert fsm.ROOM_MODE == 'lidar'
+    assert (fsm.TILES_X, fsm.TILES_Y) == (2, 2)
+    assert fsm.FRONT_WALL == 'south' and fsm.Y_AXIS == 'left'
+
+
+def test_four_tile_centres_inside_the_room(fsm):
+    """2x2 in a 5.41 m room: centres at +/-1.3525 m on both axes."""
+    cells = fsm.build_tile_centres()
+    assert len(cells) == 4
+    for x, y in cells:
+        assert abs(x) <= fsm.ROOM_X / 2.0 and abs(y) <= fsm.ROOM_Y / 2.0
+        assert abs(x) == pytest.approx(fsm.ROOM_X / 4.0)
+        assert abs(y) == pytest.approx(fsm.ROOM_Y / 4.0)
+    assert len(set(cells)) == 4, "the four centres must be distinct"
+
+
+def test_serpentine_order_never_backtracks(fsm):
+    """Consecutive tiles are adjacent; a raster order crosses the room."""
+    cells = fsm.build_tile_centres()
+    hops = [math.dist(cells[i], cells[i + 1]) for i in range(len(cells) - 1)]
+    step = fsm.ROOM_X / fsm.TILES_X
+    for h in hops:
+        assert h == pytest.approx(step, abs=1e-6), \
+            "a serpentine hop is one tile, never the width of the room"
+
+
+def test_wall_margin_pulls_fine_grids_off_the_walls(fsm):
+    """2x2 is already clear; 4x4 would plan 0.68 m from a wall without this."""
+    fsm.TILES_X = fsm.TILES_Y = 4
+    fsm.WALL_MARGIN = 0.90
+    for x, y in fsm.build_tile_centres():
+        assert abs(x) <= fsm.ROOM_X / 2.0 - fsm.WALL_MARGIN + 1e-9
+        assert abs(y) <= fsm.ROOM_Y / 2.0 - fsm.WALL_MARGIN + 1e-9
+
+
+def test_the_arena_transform_round_trips(fsm):
+    """arena -> NED -> arena must be the identity, or every tile is misplaced."""
+    fsm.lidar_fix = (1.0, -0.5, 1.75, math.radians(30.0))
+    fsm.lidar_fix_time = time.monotonic()
+    fsm.local_position.x, fsm.local_position.y = 2.0, 3.0
+    fsm.local_position.z = -1.75
+    fsm.local_position.heading = math.radians(15.0)
+    fsm.update_transform()
+    assert fsm.arena_tf is not None
+
+    for ax, ay in ((0.0, 0.0), (1.35, 1.35), (-1.35, 0.8)):
+        n, e, _ = fsm.arena_to_ned(ax, ay)
+        bx, by = fsm.ned_to_arena(n, e)
+        assert bx == pytest.approx(ax, abs=1e-9)
+        assert by == pytest.approx(ay, abs=1e-9)
+
+
+def test_the_transform_is_the_identity_for_the_aircrafts_own_position(fsm):
+    """The fix and the local pose describe the SAME vehicle, so converting the
+    arena fix must land on the aircraft's own NED position."""
+    fsm.lidar_fix = (1.0, -0.5, 1.75, math.radians(30.0))
+    fsm.lidar_fix_time = time.monotonic()
+    fsm.local_position.x, fsm.local_position.y = 2.0, 3.0
+    fsm.local_position.z = -1.75
+    fsm.local_position.heading = math.radians(15.0)
+    fsm.update_transform()
+
+    n, e, _ = fsm.arena_to_ned(fsm.lidar_fix[0], fsm.lidar_fix[1])
+    assert n == pytest.approx(2.0, abs=1e-6)
+    assert e == pytest.approx(3.0, abs=1e-6)
+
+
+def test_a_drifted_transform_is_unhealthy(fsm):
+    """Every tile centre is computed through this, so drift misplaces them all."""
+    fsm.arena_tf_ref = (0.0, 0.0, 0.0, 0.0)
+    fsm.arena_tf = (0.0, 0.0, 0.0, 0.0)
+    assert fsm.transform_is_healthy()
+    fsm.arena_tf = (0.0, fsm.TRANSFORM_DRIFT_MAX + 0.1, 0.0, 0.0)
+    assert not fsm.transform_is_healthy()
+    fsm.arena_tf = (fsm.TRANSFORM_YAW_DRIFT_MAX + 0.1, 0.0, 0.0, 0.0)
+    assert not fsm.transform_is_healthy()
+
+
+def test_a_stale_lidar_fix_is_not_fresh(fsm):
+    fsm.lidar_fix = (0.0, 0.0, 1.75, 0.0)
+    fsm.lidar_fix_time = time.monotonic()
+    assert fsm.lidar_fix_is_fresh()
+    fsm.lidar_fix_time = time.monotonic() - fsm.LIDAR_FIX_TIMEOUT - 1.0
+    assert not fsm.lidar_fix_is_fresh()
+
+
+def test_front_wall_relabel_is_a_quarter_turn(fsm):
+    """south is the identity; west is +90 deg."""
+    fsm.FRONT_WALL, fsm.Y_AXIS = 'south', 'left'
+    assert fsm._relabel(1.0, 0.0, 0.0) == pytest.approx((1.0, 0.0, 0.0))
+    fsm.FRONT_WALL = 'west'
+    x, y, yaw = fsm._relabel(1.0, 0.0, 0.0)
+    assert (x, y) == pytest.approx((0.0, 1.0), abs=1e-9)
+    assert yaw == pytest.approx(math.pi / 2.0)
+
+
+def test_y_axis_right_mirrors_the_frame(fsm):
+    fsm.FRONT_WALL, fsm.Y_AXIS = 'south', 'right'
+    x, y, yaw = fsm._relabel(1.0, 2.0, 0.5)
+    assert (x, y) == pytest.approx((1.0, -2.0))
+    assert yaw == pytest.approx(-0.5)
+
+
+def test_a_failed_tile_scan_still_flies_home(fsm):
+    """The tiles are the scoring part, but the aircraft must still leave."""
+    fsm.build_tile_centres()
+    relocks = []
+    fsm._begin_relock = lambda: relocks.append('relock')
+    fsm._tile_scan_give_up('lidar died')
+    assert relocks == ['relock'], "a failed scan must not strand it inside"
+    assert fsm.landings == [], "and must not land in the room"
+
+
+def test_box_mode_restores_the_inherited_pattern(fsm):
+    fsm.home_z = 0.0
+    fsm.ROOM_MODE = 'box'
+    fsm.room_alt_set = True
+    fsm._begin_room()
+    assert fsm.current_stage in (fsm.ROOM_MOVE, fsm.ROOM_TURN)
+
+
+def test_the_scan_returns_to_the_window_axis_not_the_room_centre(fsm):
+    """The window is rarely centred in its wall.
+
+    Returning to the room's centre line leaves the aperture off to one side,
+    and at the short range RELOCK works at, off-axis means one edge outside
+    the frame -- truncated, which the estimator refuses outright. The entry
+    point IS the window axis, because the aircraft flew in through it.
+    """
+    fsm.build_tile_centres()
+    fsm.arena_entry = (-0.77, -0.43)
+    sx, sy = fsm.relock_station_arena()
+    assert sx == pytest.approx(-0.77), "lateral must come from the entry"
+    assert sy == pytest.approx(-(fsm.ROOM_Y / 2.0) + fsm.RELOCK_STANDOFF)
+
+    fsm.arena_entry = None
+    sx, _ = fsm.relock_station_arena()
+    assert sx == pytest.approx(0.0), "with no entry recorded, fall back to centre"
+
+
+def test_the_return_station_is_off_the_window_wall(fsm):
+    """Far enough out that the whole aperture fits in frame for the relock."""
+    _, sy = fsm.relock_station_arena()
+    assert sy > -(fsm.ROOM_Y / 2.0), "must be inside the room"
+    assert abs(sy + fsm.ROOM_Y / 2.0) == pytest.approx(fsm.RELOCK_STANDOFF)
+
+
+def test_the_tile_scan_restores_the_cruise_yaw_rate(fsm):
+    """_begin_scan drops YAW_RATE to ~3 deg/s for the sweep and never puts it
+    back. A 180 degree turn at that rate takes a minute and times out short."""
+    fsm.home_z = 0.0
+    fsm.YAW_RATE = fsm.SCAN_YAW_RATE
+    fsm._begin_tile_scan()
+    assert fsm.YAW_RATE == pytest.approx(fsm.cruise_yaw_rate)
+    assert fsm.YAW_RATE > fsm.SCAN_YAW_RATE
+
+
+def test_the_tile_scan_arms_the_doll_detector(fsm):
+    fsm.home_z = 0.0
+    fsm.dolls_armed = False
+    fsm._begin_tile_scan()
+    assert fsm.dolls_armed, "the detector must be on for the tiles"
+    assert fsm.current_stage == fsm.TILE_SETTLE
+
+
+def test_the_transform_reference_is_latched_after_settling_not_before(fsm):
+    """The low-pass takes latch_sec to converge; a reference captured at the
+    first sample turns the filter's own settling into apparent drift."""
+    fsm.lidar_fix = (0.0, 0.0, 1.75, 0.0)
+    fsm.lidar_fix_time = time.monotonic()
+    fsm.local_position.heading = 0.0
+    fsm.update_transform()
+    assert fsm.arena_tf is not None
+    assert fsm.arena_tf_ref is None, "not latched by update_transform"
+    assert fsm.transform_is_healthy(), "unlatched is not unhealthy"
+
+    fsm.latch_transform_reference()
+    assert fsm.arena_tf_ref is not None

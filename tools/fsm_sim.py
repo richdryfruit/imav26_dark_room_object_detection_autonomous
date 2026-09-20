@@ -174,6 +174,16 @@ class World:
             [n, e - self.half_w, d + self.half_h],   # bottom-left
         ])
 
+    @property
+    def room_centre_n(self):
+        ty = self.TAKEOFF_GZ[1]
+        return 0.5 * (self.ROOM_Y[0] + self.ROOM_Y[1]) - ty
+
+    @property
+    def room_centre_e(self):
+        tx = self.TAKEOFF_GZ[0]
+        return 0.5 * (self.ROOM_X[0] + self.ROOM_X[1]) - tx
+
     def inside_room(self, p):
         n, e = float(p[0]), float(p[1])
         tx, ty = self.TAKEOFF_GZ
@@ -350,6 +360,28 @@ class Sim:
         half = v.yaw / 2.0
         att.q = [math.cos(half), 0.0, 0.0, math.sin(half)]
         n.attitude_callback(att)
+
+        # The 2D lidar's wall fix, in the ARENA frame. wall_localizer derives
+        # this from the four walls on every scan; here it is simply the
+        # vehicle's position relative to the room centre, which is what a
+        # perfect localizer would report. Published only once inside the room,
+        # because outside it there are no four walls to fit.
+        if self.world.inside_room(v.p):
+            # The arena frame is ENU-like -- +X east-ish along the south wall,
+            # +Y north-ish, +Z up -- and its yaw is counter-clockwise from
+            # +X. The vehicle state here is NED. Publishing NED numbers into
+            # an ENU message is the classic way to get a transform that looks
+            # fine until the vehicle yaws, so the conversion is explicit:
+            lo = Odometry()
+            lo.pose.pose.position.x = float(v.p[1]) - self.world.room_centre_e
+            lo.pose.pose.position.y = float(v.p[0]) - self.world.room_centre_n
+            lo.pose.pose.position.z = float(-v.p[2])
+            enu_yaw = math.atan2(math.sin(math.pi / 2.0 - v.yaw),
+                                 math.cos(math.pi / 2.0 - v.yaw))
+            half_y = enu_yaw / 2.0
+            lo.pose.pose.orientation.w = math.cos(half_y)
+            lo.pose.pose.orientation.z = math.sin(half_y)
+            n.lidar_odom_callback(lo)
 
         # RTAB-Map odometry, as a liveness signal. The FSM never flies this --
         # it flies EKF2's fused estimate -- but it refuses to fly at all if

@@ -153,6 +153,7 @@ from std_msgs.msg import Bool, String
 
 from drone_testing.offboard_sequence import DIRECTIONS, spin_node
 from drone_testing.offboard_sequence_vio import OffboardSequenceVio
+from drone_testing.room_lidar_scan import LidarRoomScan, wrap_pi
 from drone_testing.precision_land import PrecisionLand, body_words
 from drone_testing.window_room_traverse import WindowRoomTraverse
 
@@ -203,7 +204,7 @@ class Leg:
                 f"{target}" + (" (required)" if self.required else ""))
 
 
-class MissionFSM(WindowRoomTraverse):
+class MissionFSM(WindowRoomTraverse, LidarRoomScan):
     """The room mission, with marker-terminated legs to it, away and to the pad."""
 
     # ---- the stages this class adds ---------------------------------------
@@ -216,9 +217,14 @@ class MissionFSM(WindowRoomTraverse):
     ALT_CHANGE = "ALT_CHANGE"       # climbing or descending between phases
     WINDOW_BACKOFF = "WINDOW_BACKOFF"   # retreating to fit the aperture in frame
     MARKER_RETRY = "MARKER_RETRY"   # high and looking again for a missed marker
+    TILE_SETTLE = "TILE_SETTLE"     # stabilising on the lidar before scanning
+    TILE_MOVE = "TILE_MOVE"         # flying to a tile centre in the arena frame
+    TILE_DWELL = "TILE_DWELL"       # stationary while the detector works
+    TILE_RETURN = "TILE_RETURN"     # back to the window wall for the relock
 
     LEG_STAGES = (CRUISE, MARKER_ALIGN, MARKER_HOLD, ALT_CHANGE,
                   WINDOW_BACKOFF, MARKER_RETRY)
+    TILE_STAGES = (TILE_SETTLE, TILE_MOVE, TILE_DWELL, TILE_RETURN)
 
     # ---- the markers ------------------------------------------------------
     # id 0 is the takeoff pad and is deliberately absent: this node never
@@ -256,7 +262,12 @@ class MissionFSM(WindowRoomTraverse):
     WINDOW_ALTITUDE = 1.75      # m. Dropped to on first sighting of the
                                 # window marker; climbed back out of after
                                 # the room, on sighting it again.
-    ROOM_ALTITUDE = 1.75        # m the box pattern is flown at. NOT the
+    ROOM_MODE = 'lidar'         # lidar | box. 'lidar' divides the room into
+                                # tiles and flies their centres off the wall
+                                # localizer's drift-free fix. 'box' restores
+                                # the inherited dead-reckoned leg pattern.
+    TILE_MOVE_TIMEOUT = 25.0    # s to reach one tile centre before skipping it
+    ROOM_ALTITUDE = 1.75        # m the tile scan is flown at. NOT the
                                 # traverse height: the traversal is lined up
                                 # on the measured window pose and goes through
                                 # wherever the aperture actually is, but once
@@ -430,6 +441,13 @@ class MissionFSM(WindowRoomTraverse):
             'cruise_altitude', self.CRUISE_ALTITUDE))
         self.WINDOW_ALTITUDE = float(self._declare_number(
             'window_altitude_m', self.WINDOW_ALTITUDE))
+        self.ROOM_MODE = str(self.declare_parameter(
+            'room_mode', self.ROOM_MODE).value).strip().lower()
+        if self.ROOM_MODE not in ('lidar', 'box'):
+            raise SystemExit(
+                f"room_mode must be 'lidar' or 'box'; got '{self.ROOM_MODE}'.")
+        self.TILE_MOVE_TIMEOUT = float(self._declare_number(
+            'tile_move_timeout', self.TILE_MOVE_TIMEOUT))
         self.ROOM_ALTITUDE = float(self._declare_number(
             'room_altitude', self.ROOM_ALTITUDE))
         self.ALT_CHANGE_TIMEOUT = float(self._declare_number(
@@ -625,6 +643,12 @@ class MissionFSM(WindowRoomTraverse):
                           '/fmu/out/vehicle_attitude_v1')
         ]
 
+        # The lidar tile scan's own parameters and subscriptions. Declared
+        # even in 'box' mode so a launch file may pass them either way -- an
+        # undeclared override is a fatal error at startup and a launch file
+        # cannot know which branch is taken.
+        self.init_lidar_scan(time.monotonic)
+
         self.get_logger().warning(self._plan_summary())
 
     # ------------------------------------------------------------- the plan
@@ -659,9 +683,13 @@ class MissionFSM(WindowRoomTraverse):
             f"  2. {leg('outbound')}\n"
             f"  3. {leg('offset')}   <- onto the window axis\n"
             "  4. find the window, line up, traverse in\n"
-            f"  5. room pattern, {len(self.room_steps)} legs, dolls counted, "
-            "geotagged and displayed\n"
-            "  6. relock on the window from inside, traverse out\n"
+            + (f"  5. room: {self.TILES_X}x{self.TILES_Y} tile scan on the "
+               f"LIDAR wall fix, {self.TILE_DWELL_SECONDS:.0f} s per tile, "
+               "dolls counted, geotagged and displayed\n"
+               if self.ROOM_MODE == 'lidar' else
+               f"  5. room pattern, {len(self.room_steps)} dead-reckoned legs, "
+               "dolls counted, geotagged and displayed\n")
+            + "  6. relock on the window from inside, traverse out\n"
             f"  7. {leg('offset_back')}   <- back onto the marker line\n"
             f"  8. {leg('return')}\n"
             f"  9. {leg('turn')}\n"
@@ -856,11 +884,34 @@ class MissionFSM(WindowRoomTraverse):
         where the vehicle is somewhere unplanned and the battery is the only
         thing still counting.
         """
-        return super()._clock_stages() + self.LEG_STAGES
+        return super()._clock_stages() + self.LEG_STAGES + self.TILE_STAGES
 
     # ------------------------------------------------------------ the machine
 
     def timer_callback(self):
+        if self.current_stage in self.TILE_STAGES:
+            self._publish_mission_phase()
+            if self._check_flight_clock():
+                return
+            if self.stream_setpoints:
+                self.publish_offboard_control_mode()
+                self.publish_position_setpoint()
+            self.publish_status()
+            if self.kill_requested:
+                self._enter_stage(self.KILLING)
+                return
+            if self.abort_requested:
+                self.abort_requested = False
+                self._begin_landing("operator abort")
+                return
+            {
+                self.TILE_SETTLE: self._handle_tile_settle,
+                self.TILE_MOVE: self._handle_tile_move,
+                self.TILE_DWELL: self._handle_tile_dwell,
+                self.TILE_RETURN: self._handle_tile_return,
+            }[self.current_stage]()
+            return
+
         if self.current_stage not in self.LEG_STAGES:
             # Everything else is the room node's, the traversal's or the base
             # class's, reached through the same call it always was.
@@ -1416,6 +1467,290 @@ class MissionFSM(WindowRoomTraverse):
 
         self._begin_leg_named(nxt)
 
+    # --------------------------------------------- the lidar tile scan
+
+    def _begin_tile_scan(self):
+        """Hand the room over to the lidar, once inside and stable.
+
+        Called in place of the inherited box pattern. The VIO is still being
+        fused by EKF2 and is still what flow_is_healthy() tests -- nothing
+        about the estimator changes here. What changes is that the waypoints
+        are now measured from the WALLS instead of from EKF2's origin, so
+        they stop moving when EKF2 drifts.
+        """
+        self.build_tile_centres()
+        self.tile_index = 0
+        self.tiles_done = []
+        self.room_entry_heading = 0.0
+        self.tile_arrived_since = None
+        self.tile_dwell_started = None
+        self.MOVE_SPEED = self.TILE_SPEED
+        # Restore the cruise yaw rate. _begin_scan dropped it to
+        # SCAN_YAW_RATE (~3 deg/s) for the window sweep and nothing puts it
+        # back, so the half turn before the relock would take a minute and
+        # time out at 50 degrees short -- pointing the yaw cone at a wall.
+        self.YAW_RATE = self.cruise_yaw_rate
+        self._arm_dolls('inside the room, starting the tile scan')
+        self.get_logger().warning(
+            f"TILE SCAN: {self.TILES_X}x{self.TILES_Y} = "
+            f"{len(self.tile_centres_arena)} tiles in a "
+            f"{self.ROOM_X:.2f}x{self.ROOM_Y:.2f} m room, {self.TILE_ORDER} "
+            f"order, {self.TILE_DWELL_SECONDS:.0f} s at each. Planning in the "
+            f"arena frame: +X is the {self.FRONT_WALL.upper()} wall, +Y to its "
+            f"{self.Y_AXIS.upper()}.")
+        self._enter_stage(self.TILE_SETTLE)
+
+    def _handle_tile_settle(self):
+        """Stabilise on the lidar before flying anything in its frame.
+
+        The transform needs both pose streams live and a few ticks of
+        low-pass before it means anything, and a tile centre computed through
+        a half-converged transform is in the wrong place. So the scan does not
+        start until there is a fresh fix AND a transform, which is what the
+        'stabilize it first' in the plan amounts to.
+        """
+        if not self._still_flyable():
+            return
+        self._try_latch_xy_hold()
+        self.update_transform()
+        self.log_flight_state()
+
+        if not self.lidar_fix_is_fresh():
+            if self._in_stage_for() > self.LIDAR_FIX_TIMEOUT * 5.0:
+                self._tile_scan_give_up(
+                    'no lidar fix inside the room -- is wall_localizer running '
+                    'and is the scan height inside the window band?')
+                return
+            self.get_logger().info(
+                f"Waiting for a lidar fix... ({self.lidar_status or 'no status'})",
+                throttle_duration_sec=1.0)
+            return
+
+        if self.arena_tf is None:
+            self.get_logger().info("Deriving the arena transform...",
+                                   throttle_duration_sec=1.0)
+            return
+
+        # The low-pass needs latch_sec to converge before the drift reference
+        # means anything. This wait IS the 'stabilise first' step.
+        if self._in_stage_for() < self.TRANSFORM_LATCH_SECONDS:
+            self.get_logger().info(
+                f"Settling the arena transform, "
+                f"{self.TRANSFORM_LATCH_SECONDS - self._in_stage_for():.1f} s "
+                "to go...", throttle_duration_sec=1.0)
+            return
+
+        self.latch_transform_reference()
+        ax, ay = self.ned_to_arena(self.local_position.x, self.local_position.y)
+        # The aircraft got in through the window, so where it is standing now
+        # IS the window axis. Recorded for the return -- see
+        # relock_station_arena.
+        self.arena_entry = (ax, ay)
+        # ...and the heading it came in on. The window is directly BEHIND that
+        # heading, so the way to face it again is a half turn. The old box
+        # pattern got this for free from its two 90-degree legs; a tile scan
+        # never yaws, so it has to be commanded.
+        self.room_entry_heading = float(self.local_position.heading)
+        self.get_logger().warning(
+            f"Stable on the lidar at arena ({ax:+.2f}, {ay:+.2f}) m, transform "
+            f"latched. Flying {len(self.tile_centres_arena)} tiles.")
+        self._enter_stage(self.TILE_MOVE)
+
+    def _handle_tile_move(self):
+        """Fly to the current tile centre, re-derived in NED every tick."""
+        if not self._still_flyable():
+            return
+        self._try_latch_xy_hold()
+        self.update_transform()
+        self.log_flight_state()
+
+        if not self._tile_health_ok():
+            return
+
+        tile = self.current_tile()
+        if tile is None:
+            self._finish_tile_scan('all tiles visited')
+            return
+
+        n, e, _ = self.arena_to_ned(tile[0], tile[1])
+        self._set_target(n, e)
+
+        lp = self.local_position
+        remaining = math.hypot(n - lp.x, e - lp.y)
+        if remaining <= self.TILE_ARRIVE_EPS:
+            if self.tile_arrived_since is None:
+                self.tile_arrived_since = time.monotonic()
+            elif (time.monotonic() - self.tile_arrived_since
+                    >= self.TILE_SETTLE_SECONDS):
+                # Pin the hold to the tile centre so the dwell is station
+                # keeping rather than a slow continuation of the approach.
+                self.moving = False
+                self.hold_x, self.hold_y = n, e
+                self.tile_dwell_started = time.monotonic()
+                self.get_logger().warning(
+                    f"Tile {self.tile_progress()} at arena "
+                    f"({tile[0]:+.2f}, {tile[1]:+.2f}) m. Holding "
+                    f"{self.TILE_DWELL_SECONDS:.0f} s for the detector.")
+                self._enter_stage(self.TILE_DWELL)
+            return
+
+        self.tile_arrived_since = None
+        self.get_logger().info(
+            f"Tile {self.tile_progress()}: {remaining:.2f} m to go.",
+            throttle_duration_sec=1.0)
+
+        if self._in_stage_for() > self.TILE_MOVE_TIMEOUT:
+            self.get_logger().error(
+                f"Tile {self.tile_progress()} not reached in "
+                f"{self.TILE_MOVE_TIMEOUT:.0f} s, {remaining:.2f} m short. "
+                "Skipping it.")
+            self.tiles_done.append(f"{self.tile_progress()} TIMED OUT")
+            self._next_tile()
+
+    def _handle_tile_dwell(self):
+        """Hold still while doll_detect works this tile.
+
+        Stationary on purpose. The detector needs MIN_FRAMES_TO_CONFIRM
+        consecutive frames on a track before it counts a doll, and a moving
+        camera costs tracks to motion blur at exactly the moment they are
+        being confirmed.
+        """
+        if not self._still_flyable():
+            return
+        self._try_latch_xy_hold()
+        self.update_transform()
+        self.log_flight_state()
+
+        if not self._tile_health_ok():
+            return
+
+        left = self.TILE_DWELL_SECONDS - (time.monotonic() - self.tile_dwell_started)
+        if left <= 0.0:
+            tile = self.current_tile()
+            self.tiles_done.append(
+                f"{self.tile_progress()} ({tile[0]:+.2f},{tile[1]:+.2f})")
+            self.get_logger().warning(
+                f"Tile {self.tile_progress()} done. Dolls so far: "
+                f"{self.doll_count if hasattr(self, 'doll_count') else '?'}")
+            self._next_tile()
+            return
+
+        self.get_logger().info(
+            f"Tile {self.tile_progress()}: dwelling {left:.1f} s.",
+            throttle_duration_sec=1.0)
+
+    def _next_tile(self):
+        self.tile_index += 1
+        self.tile_arrived_since = None
+        self.tile_dwell_started = None
+        if self.current_tile() is None:
+            self.get_logger().warning(
+                f"All {len(self.tile_centres_arena)} tiles scanned. Returning "
+                f"to {self.RELOCK_STANDOFF:.2f} m off the window wall for the "
+                "relock.")
+            self._enter_stage(self.TILE_RETURN)
+            return
+        self.MOVE_SPEED = self.TILE_SPEED
+        self._enter_stage(self.TILE_MOVE)
+
+    def _handle_tile_return(self):
+        """Fly back to the window side before handing over to RELOCK.
+
+        The serpentine finishes in whichever corner the pattern ends in, which
+        for a 2x2 is the one FURTHEST from the window. RELOCK has to rebuild a
+        window pose from scratch and needs the whole aperture in frame to do
+        it, so starting it from the far corner is asking it to fail. This is
+        the 'come back' step.
+        """
+        if not self._still_flyable():
+            return
+        self._try_latch_xy_hold()
+        self.update_transform()
+        self.log_flight_state()
+
+        # Deliberately NOT gated on _tile_health_ok: if the lidar has died,
+        # flying back toward the window on the last good transform is still
+        # better than relocking from the far corner, and RELOCK itself does
+        # not need the lidar at all.
+        if self.arena_tf is None:
+            self._finish_tile_scan('no transform for the return')
+            return
+
+        sx, sy = self.relock_station_arena()
+        n, e, _ = self.arena_to_ned(sx, sy)
+        self._set_target(n, e)
+
+        # Face back the way we came in. RELOCK latches its yaw cone on the
+        # heading it STARTS from, so arriving still pointed at the far wall
+        # would centre a 50-degree cone on entirely the wrong direction and
+        # every window sample would be gated out.
+        facing = wrap_pi(self.room_entry_heading + math.pi)
+        # Set yaw_remaining DIRECTLY rather than through _aim_yaw_at. That
+        # helper clamps to the +/-yaw_cone_deg cone, which exists to stop the
+        # window search wandering off the wall it was pointed at -- and a
+        # half turn is 180 degrees, so it would be clipped to 50 and the
+        # aircraft would stop a long way short, facing nothing. The inherited
+        # room turn sets it directly for the same reason. The ramp still
+        # limits the rate; only the cone is bypassed.
+        self.yaw_remaining = wrap_pi(facing - self.yaw_setpoint)
+        turned = abs(self._heading_error(facing)) <= self.ALIGN_YAW_TOLERANCE
+
+        lp = self.local_position
+        remaining = math.hypot(n - lp.x, e - lp.y)
+        arrived = remaining <= self.TILE_ARRIVE_EPS
+        if (arrived and turned) or self._in_stage_for() > self.TILE_MOVE_TIMEOUT:
+            self.moving = False
+            self.hold_x, self.hold_y = lp.x, lp.y
+            if not turned:
+                self.get_logger().warning(
+                    "Returned but still "
+                    f"{math.degrees(abs(self._heading_error(facing))):.0f} deg "
+                    "off the entry heading; relocking anyway.")
+            self._finish_tile_scan('all tiles visited')
+            return
+
+        self.get_logger().info(
+            f"Returning to the window wall, {remaining:.2f} m and "
+            f"{math.degrees(abs(self._heading_error(facing))):.0f} deg to go.",
+            throttle_duration_sec=1.0)
+
+    def _tile_health_ok(self):
+        """The two things that invalidate every waypoint at once."""
+        if not self.lidar_fix_is_fresh():
+            self._tile_scan_give_up(
+                f"lidar fix stale for more than {self.LIDAR_FIX_TIMEOUT:.1f} s "
+                f"({self.lidar_status or 'no status'})")
+            return False
+        if not self.transform_is_healthy():
+            self._tile_scan_give_up(
+                'the arena->NED transform has drifted beyond '
+                f"{self.TRANSFORM_DRIFT_MAX:.2f} m / "
+                f"{math.degrees(self.TRANSFORM_YAW_DRIFT_MAX):.0f} deg -- one "
+                'pose stream is moving against the other, so every tile '
+                'centre is now in the wrong place')
+            return False
+        return True
+
+    def _tile_scan_give_up(self, why):
+        """Stop scanning, keep the mission. The way out does not need tiles."""
+        self.get_logger().error(f"TILE SCAN ABANDONED: {why}.")
+        self.tiles_done.append(f"ABANDONED: {why}")
+        self._finish_tile_scan(f"abandoned -- {why}")
+
+    def _finish_tile_scan(self, outcome):
+        """Hand back to the inherited way out: relock and traverse.
+
+        Deliberately NOT a landing. The tiles are the scoring part, but the
+        aircraft still has to leave the room, and the way out is flown on the
+        window, not on the lidar -- so a failed scan still gets flown home.
+        """
+        self.moving = False
+        self.MOVE_SPEED = self.APPROACH_SPEED
+        self.get_logger().warning(
+            f"Tile scan {outcome}. Scanned: {self.scan_summary()}. "
+            "Turning for the way out.")
+        self._begin_relock()
+
     # ----------------------------------------------------- the room height
 
     def _begin_room(self):
@@ -1434,7 +1769,10 @@ class MissionFSM(WindowRoomTraverse):
         if not self.room_alt_set:
             self.room_alt_set = True
             self._begin_alt_change(self.ROOM_ALTITUDE, 'room',
-                                   'inside, levelling for the box pattern')
+                                   'inside, levelling for the room pattern')
+            return
+        if self.ROOM_MODE == 'lidar':
+            self._begin_tile_scan()
             return
         super()._begin_room()
 
@@ -1747,6 +2085,8 @@ class MissionFSM(WindowRoomTraverse):
             return 'WINDOW_RETRY'
         if self.current_stage == self.MARKER_RETRY:
             return 'MARKER_RETRY'
+        if self.current_stage in self.TILE_STAGES:
+            return 'ROOM'
         leg = self.current_leg()
         if leg is not None:
             return {
@@ -1766,7 +2106,7 @@ class MissionFSM(WindowRoomTraverse):
         stages would fall through to it with no detail of their own and leave
         the last traversal's text frozen on the screen.
         """
-        if self.current_stage not in self.LEG_STAGES:
+        if self.current_stage not in self.LEG_STAGES + self.TILE_STAGES:
             super().publish_status()
             return
 
@@ -1783,6 +2123,14 @@ class MissionFSM(WindowRoomTraverse):
         elif self.current_stage == self.MARKER_RETRY:
             detail = ('retrace' if self.retry_moving
                       else f"high {self.MARKER_RETRY_ALTITUDE:.1f}")
+        elif self.current_stage == self.TILE_SETTLE:
+            detail = 'lidar?' if not self.lidar_fix_is_fresh() else 'settling'
+        elif self.current_stage == self.TILE_MOVE:
+            detail = f"tile {self.tile_progress()}"
+        elif self.current_stage == self.TILE_DWELL:
+            left = max(0.0, self.TILE_DWELL_SECONDS
+                       - (time.monotonic() - (self.tile_dwell_started or 0.0)))
+            detail = f"dwell {left:.0f}s"
         elif self.current_stage == self.CRUISE:
             lp = self.local_position
             if self.moving and lp is not None and self.move_target_x is not None:

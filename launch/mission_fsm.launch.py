@@ -315,6 +315,29 @@ def generate_launch_description():
                     'vio_max_covariance': LaunchConfiguration('vio_max_covariance'),
                     'allow_missing_vio_status': LaunchConfiguration(
                         'allow_missing_vio_status'),
+                    # ---- the dark room, flown on the lidar ----
+                    'room_mode': LaunchConfiguration('room_mode'),
+                    'front_wall': LaunchConfiguration('front_wall'),
+                    'y_axis': LaunchConfiguration('y_axis'),
+                    'room_x': LaunchConfiguration('lidar_room_x'),
+                    'room_y': LaunchConfiguration('lidar_room_y'),
+                    'tiles_x': LaunchConfiguration('tiles_x'),
+                    'tiles_y': LaunchConfiguration('tiles_y'),
+                    'order': LaunchConfiguration('tile_order'),
+                    'dwell_s': LaunchConfiguration('tile_dwell_s'),
+                    'arrive_eps': LaunchConfiguration('tile_arrive_eps'),
+                    'settle_s': LaunchConfiguration('tile_settle_s'),
+                    'speed': LaunchConfiguration('tile_speed'),
+                    'wall_margin': LaunchConfiguration('tile_wall_margin'),
+                    'relock_standoff': LaunchConfiguration('relock_standoff'),
+                    'latch_sec': LaunchConfiguration('latch_sec'),
+                    'fix_timeout': LaunchConfiguration('lidar_fix_timeout'),
+                    'transform_drift_max': LaunchConfiguration(
+                        'transform_drift_max'),
+                    'transform_yaw_drift_max_deg': LaunchConfiguration(
+                        'transform_yaw_drift_max_deg'),
+                    'lidar_odom_topic': LaunchConfiguration('lidar_odom_topic'),
+                    'tile_move_timeout': LaunchConfiguration('tile_move_timeout'),
                     # ---- the altitude schedule ----
                     'cruise_altitude': LaunchConfiguration('cruise_altitude'),
                     'window_altitude_m': LaunchConfiguration('window_altitude_m'),
@@ -410,6 +433,93 @@ def generate_launch_description():
             'allow_missing_vio_status', default_value='true',
             description='No /rtabmap/odom at all -> fall back to EKF2\'s own '
                         'cs_ev_* opinion rather than refusing to fly.'),
+
+        # ---- THE DARK ROOM, FLOWN ON THE 2D LIDAR ----
+        #
+        # Inside the room the VIO degrades -- a bare, unlit, low-texture box
+        # is the worst case for visual odometry. It is NOT switched off and
+        # EKF2 keeps fusing it; nothing here touches the estimator. What
+        # changes is only what the waypoints are MEASURED FROM.
+        #
+        # wall_localizer fits lines to the four walls on every scan
+        # independently, so it has no state and therefore no drift. Tiles
+        # planned in that frame stay where they are relative to the walls
+        # however far EKF2 has wandered. The arena->NED transform is
+        # re-derived every tick and its movement is the health check.
+        #
+        # Requires the lidar stack to be running:
+        #     ros2 launch lidar_loc localize.launch.py
+        DeclareLaunchArgument(
+            'room_mode', default_value='lidar',
+            description='lidar | box. lidar divides the room into tiles and '
+                        'flies their centres off the wall localizer. box '
+                        'restores the inherited dead-reckoned leg pattern.'),
+        DeclareLaunchArgument(
+            'front_wall', default_value='south',
+            description='south|north|east|west. Which wall becomes arena +X. '
+                        'The localizer identifies SOUTH from the room itself '
+                        '(it is the only wall with holes in it, and that '
+                        'asymmetry resolves the 90-degree ambiguity a bare '
+                        'square has). This only RELABELS that result into the '
+                        'frame the tiles are planned in.'),
+        DeclareLaunchArgument(
+            'y_axis', default_value='left',
+            description='left | right of the front wall, for arena +Y.'),
+        DeclareLaunchArgument('lidar_room_x', default_value='5.41',
+                              description='m. Nominal only -- the localizer '
+                                          'measures the real thing every scan.'),
+        DeclareLaunchArgument('lidar_room_y', default_value='5.41'),
+        DeclareLaunchArgument('tiles_x', default_value='2'),
+        DeclareLaunchArgument('tiles_y', default_value='2',
+                              description='2x2 is the competition pattern; '
+                                          '3x3 needs no code change.'),
+        DeclareLaunchArgument(
+            'tile_order', default_value='serpentine',
+            description='serpentine | raster. Serpentine keeps consecutive '
+                        'tiles adjacent; raster flies the full width of the '
+                        'room between rows.'),
+        DeclareLaunchArgument(
+            'tile_dwell_s', default_value='3.0',
+            description='s held stationary at each centre. doll_detect needs '
+                        'MIN_FRAMES_TO_CONFIRM (5) consecutive frames on a '
+                        'track before it counts one, so this must comfortably '
+                        'exceed 5 frames at the model rate.'),
+        DeclareLaunchArgument('tile_arrive_eps', default_value='0.15'),
+        DeclareLaunchArgument('tile_settle_s', default_value='0.5'),
+        DeclareLaunchArgument('tile_speed', default_value='0.35'),
+        DeclareLaunchArgument('tile_move_timeout', default_value='25.0'),
+        DeclareLaunchArgument(
+            'tile_wall_margin', default_value='0.90',
+            description='m. Tile centres are pulled this far off the walls. '
+                        '2x2 is already clear; this is what stops a 4x4 '
+                        'planning a centre 0.68 m from a wall.'),
+        DeclareLaunchArgument(
+            'relock_standoff', default_value='1.60',
+            description='m out from the window wall the scan returns to. The '
+                        'serpentine ends in the FAR corner and RELOCK needs '
+                        'the whole aperture in frame -- about 1.26 x the '
+                        'window height of depth. It returns to the ENTRY '
+                        'lateral position, which is the window axis by '
+                        'construction.'),
+        DeclareLaunchArgument(
+            'latch_sec', default_value='5.0',
+            description='s of settling before the transform drift reference '
+                        'is frozen. The low-pass needs this to converge; '
+                        'latch earlier and its own settling reads as drift '
+                        'and aborts the scan on a healthy aircraft.'),
+        DeclareLaunchArgument('lidar_fix_timeout', default_value='2.0',
+                              description='s without a fix before the scan is '
+                                          'abandoned (~10 missed scans).'),
+        DeclareLaunchArgument('transform_drift_max', default_value='0.50',
+                              description='m the arena->NED transform may move '
+                                          'before the scan aborts. It should '
+                                          'be CONSTANT: movement means the two '
+                                          'pose streams are diverging and '
+                                          'every tile centre is now wrong.'),
+        DeclareLaunchArgument('transform_yaw_drift_max_deg', default_value='10.0'),
+        DeclareLaunchArgument('lidar_odom_topic', default_value='/lidar/odom_kf',
+                              description='The KF-smoothed wall fix. pose_kf '
+                                          'filters /lidar/odom into this.'),
 
         # ---- THE ALTITUDE SCHEDULE ----
         #
