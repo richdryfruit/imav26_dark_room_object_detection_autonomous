@@ -801,7 +801,21 @@ def generate_launch_description():
         DeclareLaunchArgument('approach_speed', default_value='0.30'),
         DeclareLaunchArgument('traverse_speed', default_value='0.45'),
         DeclareLaunchArgument('align_tolerance', default_value='0.18'),
-        DeclareLaunchArgument('align_cross_tolerance', default_value='0.06'),
+        # TIGHTENED FOR THE REAL 0.50 x 0.60 m WINDOW.
+        #
+        # The hard abandon threshold is hard_clearance (0.030 m), and what is
+        # left at the worst alignment the gate still PERMITS is:
+        #
+        #   swept width at the yaw tolerance : 0.260 * (cos e + sin e)
+        #   lateral margin per side          : (0.50 - swept)/2 - cross_tol
+        #
+        # At the old 0.06 m / 8 deg that is 0.043 m -- thirteen millimetres
+        # over the hard clearance, which is a prop tip from a jamb. At
+        # 0.04 m / 6 deg it is 0.067 m, +37 mm, roughly three times the
+        # margin. The vertical is comfortable either way (+0.170 m per side),
+        # because 0.60 m of height against a 0.26 m airframe is generous --
+        # it is the WIDTH that binds here.
+        DeclareLaunchArgument('align_cross_tolerance', default_value='0.04'),
         DeclareLaunchArgument('align_along_tolerance', default_value='0.25'),
         DeclareLaunchArgument('recentre_clear_seconds', default_value='0.6'),
         DeclareLaunchArgument('recentre_yaw_step_deg', default_value='4.0'),
@@ -810,7 +824,7 @@ def generate_launch_description():
         DeclareLaunchArgument('recentre_backoff_seconds', default_value='7.0'),
         DeclareLaunchArgument('recentre_backoff', default_value='0.60'),
         DeclareLaunchArgument('recentre_max_backoffs', default_value='2'),
-        DeclareLaunchArgument('align_yaw_tolerance_deg', default_value='8.0'),
+        DeclareLaunchArgument('align_yaw_tolerance_deg', default_value='6.0'),
         DeclareLaunchArgument('align_settle_seconds', default_value='1.5'),
         DeclareLaunchArgument('align_timeout', default_value='60.0'),
         DeclareLaunchArgument('traverse_timeout', default_value='25.0'),

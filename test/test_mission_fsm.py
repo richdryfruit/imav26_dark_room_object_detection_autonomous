@@ -1091,3 +1091,37 @@ def test_flow_can_be_restored_by_parameter(fsm):
     assert not fsm.flow_is_healthy(), "the inherited AGL floor should bite again"
     fsm.local_position.dist_bottom = 1.0
     assert fsm.flow_is_healthy()
+
+
+# ------------------------------------------- the real window's clearance
+
+def test_the_real_window_leaves_a_workable_margin():
+    """The REAL aperture is 0.50 x 0.60 m and it is the WIDTH that binds.
+
+    hard_clearance (0.030 m) is the abandon threshold, and what matters is
+    what is left at the worst alignment the gate still PERMITS -- not at
+    perfect centring, which the aircraft never achieves:
+
+        swept width at yaw e : 0.260 * (cos e + sin e)
+        margin per side      : (width - swept)/2 - cross_tolerance
+
+    At the stock 0.06 m / 8 deg that is 43 mm: thirteen millimetres over the
+    hard clearance. The launch file tightens it to 0.04 m / 6 deg.
+    """
+    width, drone_w, hard = 0.50, 0.260, 0.030
+
+    def margin(cross_tol, yaw_deg):
+        e = math.radians(yaw_deg)
+        swept = drone_w * (abs(math.cos(e)) + abs(math.sin(e)))
+        return 0.5 * (width - swept) - cross_tol
+
+    stock = margin(0.06, 8.0)
+    tightened = margin(0.04, 6.0)
+
+    assert stock > hard, "even the stock gate does not refuse outright"
+    assert stock - hard < 0.020, "...but it leaves under 20 mm, which is why it was tightened"
+    assert tightened - hard > 0.035, "the tightened gate must leave a real margin"
+    assert tightened > stock
+
+    # The vertical is not the binding constraint on this window.
+    assert 0.5 * (0.60 - 0.260) > tightened, "height is generous; width binds"
