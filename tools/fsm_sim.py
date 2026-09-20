@@ -84,6 +84,7 @@ import rclpy
 from px4_msgs.msg import (EstimatorStatusFlags, FailsafeFlags,
                           VehicleAttitude, VehicleLandDetected,
                           VehicleLocalPosition, VehicleStatus)
+from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, Float32MultiArray, String
 
 from drone_testing.mission_fsm import MissionFSM
@@ -328,6 +329,14 @@ class Sim:
         f.cs_rng_kin_consistent = True
         f.cs_rng_fault = False
         f.cs_rng_stuck = False
+        # ...and EKF2 IS fusing external vision, because this airframe flies
+        # its lateral estimate on RTAB-Map VIO, not optical flow. Without
+        # these the FSM's flow_is_healthy() override correctly refuses every
+        # horizontal move -- which is the right answer for a flow aircraft
+        # and the wrong world to simulate.
+        f.cs_ev_pos = True
+        f.cs_ev_vel = True
+        f.cs_yaw_align = True
         n.estimator_flags_callback(f)
 
         n.failsafe_flags_callback(FailsafeFlags())
@@ -341,6 +350,16 @@ class Sim:
         half = v.yaw / 2.0
         att.q = [math.cos(half), 0.0, 0.0, math.sin(half)]
         n.attitude_callback(att)
+
+        # RTAB-Map odometry, as a liveness signal. The FSM never flies this --
+        # it flies EKF2's fused estimate -- but it refuses to fly at all if
+        # this stream is stale or its covariance says tracking is lost.
+        odom = Odometry()
+        odom.pose.pose.position.x = float(v.p[0])
+        odom.pose.pose.position.y = float(v.p[1])
+        odom.pose.pose.position.z = float(-v.p[2])
+        odom.pose.covariance[0] = 0.01
+        n.vio_odom_callback(odom)
 
     # ---- the camera ----
 

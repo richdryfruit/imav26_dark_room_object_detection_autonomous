@@ -145,12 +145,14 @@ import time
 
 import rclpy
 from geometry_msgs.msg import PointStamped
+from nav_msgs.msg import Odometry
 from px4_msgs.msg import VehicleAttitude, VehicleStatus
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
 from std_msgs.msg import Bool, String
 
 from drone_testing.offboard_sequence import DIRECTIONS, spin_node
+from drone_testing.offboard_sequence_vio import OffboardSequenceVio
 from drone_testing.precision_land import PrecisionLand, body_words
 from drone_testing.window_room_traverse import WindowRoomTraverse
 
@@ -362,6 +364,24 @@ class MissionFSM(WindowRoomTraverse):
                                 # MEASURE IT on the bench; see the
                                 # precision_land header.
 
+    # ---- where the lateral estimate comes from ---------------------------
+    # The legs between the markers are the longest unreferenced translations
+    # in the flight, and on this airframe they are flown on RTAB-Map VIO, not
+    # on optical flow. EKF2 is configured vision=x/y, lidar=height,
+    # mag=heading, flow OFF -- so the inherited flow_is_healthy() would be
+    # gating on a sensor that is not even being fused.
+    LATERAL_SOURCE = 'vio'      # vio | flow. 'flow' restores the inherited
+                                # ARK Flow predicate unchanged.
+    VIO_ODOM_TOPIC = '/rtabmap/odom'
+    VIO_MAX_AGE = 0.5           # s. Older than this is not a fix.
+    VIO_MAX_COVARIANCE = 100.0  # rtabmap_odom publishes ~9999 on lost
+                                # tracking rather than going silent.
+    ALLOW_MISSING_VIO_STATUS = True   # no /rtabmap/odom at all -> fall back
+                                      # to EKF2's own cs_ev_* opinion
+    FLOW_SETTLE_SECONDS = 2.0   # s the estimate must be good before the x/y
+                                # hold latches. Vision settles faster than
+                                # flow and is valid on the ground.
+
     # Two traversals, a room pattern, four legs and three marker acquisitions.
     # The parent's 300 s does not begin to cover it. A BACKSTOP, not a plan.
     FLIGHT_SECONDS = 600.0
@@ -391,6 +411,21 @@ class MissionFSM(WindowRoomTraverse):
                 "marker.")
 
         # ---- the legs ----
+        self.LATERAL_SOURCE = str(self.declare_parameter(
+            'lateral_source', self.LATERAL_SOURCE).value).strip().lower()
+        if self.LATERAL_SOURCE not in ('vio', 'flow'):
+            raise SystemExit(
+                f"lateral_source must be 'vio' or 'flow'; got "
+                f"'{self.LATERAL_SOURCE}'.")
+        self.VIO_ODOM_TOPIC = str(self.declare_parameter(
+            'vio_odom_topic', self.VIO_ODOM_TOPIC).value)
+        self.VIO_MAX_AGE = float(self._declare_number(
+            'vio_max_age', self.VIO_MAX_AGE))
+        self.VIO_MAX_COVARIANCE = float(self._declare_number(
+            'vio_max_covariance', self.VIO_MAX_COVARIANCE))
+        self.ALLOW_MISSING_VIO_STATUS = bool(self.declare_parameter(
+            'allow_missing_vio_status', self.ALLOW_MISSING_VIO_STATUS).value)
+
         self.CRUISE_ALTITUDE = float(self._declare_number(
             'cruise_altitude', self.CRUISE_ALTITUDE))
         self.WINDOW_ALTITUDE = float(self._declare_number(
@@ -555,6 +590,13 @@ class MissionFSM(WindowRoomTraverse):
         # traverse -- keeps the base class's zero-velocity descent untouched.
         self.precision_descent_active = False
 
+        # RTAB-Map's odometry, as a liveness signal only -- see vio_is_fresh.
+        self.vio_odom_time = None
+        self.vio_covariance = None
+        if self.LATERAL_SOURCE == 'vio':
+            self.create_subscription(Odometry, self.VIO_ODOM_TOPIC,
+                                     self.vio_odom_callback, 10)
+
         self.create_subscription(PointStamped, '/aruco/marker_points',
                                  self.marker_points_callback, 20)
         # The single-marker topics are still worth having for diagnostics --
@@ -587,6 +629,23 @@ class MissionFSM(WindowRoomTraverse):
 
     # ------------------------------------------------------------- the plan
 
+    def log_flight_state(self):
+        super().log_flight_state()
+        if self.LATERAL_SOURCE != 'vio':
+            return
+        fused = self.vision_is_fused()
+        aligned = self.yaw_is_aligned()
+        age = ('never' if self.vio_odom_time is None
+               else f"{time.monotonic() - self.vio_odom_time:.2f}s")
+        self.get_logger().info(
+            f"vio: odom_age={age} "
+            f"cov={'?' if self.vio_covariance is None else f'{self.vio_covariance:.1f}'} "
+            f"ekf_fusing={'?' if fused is None else fused} "
+            f"yaw_align={'?' if aligned is None else aligned} "
+            f"lateral_ok={self.flow_is_healthy()} "
+            f"xy={'POS-HOLD' if self.hold_xy else 'VEL-HOLD'}",
+            throttle_duration_sec=1.0)
+
     def _plan_summary(self):
         def leg(name):
             i = self.leg_by_name.get(name)
@@ -608,7 +667,10 @@ class MissionFSM(WindowRoomTraverse):
             f"  9. {leg('turn')}\n"
             f" 10. {leg('pad')}\n"
             " 11. precision descent onto the pad, disarm\n"
-            f"  Legs fly at {self.LEG_SPEED:.2f} m/s and END ON THEIR MARKER; "
+            f"  Lateral estimate: "
+            + ("RTAB-Map VIO (" + self.VIO_ODOM_TOPIC + ")\n"
+               if self.LATERAL_SOURCE == 'vio' else "ARK Flow optical flow\n")
+            + f"  Legs fly at {self.LEG_SPEED:.2f} m/s and END ON THEIR MARKER; "
             "the distance is a limit, not a target.\n"
             f"  Centring to {self.MARKER_TOLERANCE * 100:.0f} cm, then "
             f"{self.MARKER_HOLD_SECONDS:.0f} s of hold.\n"
@@ -684,6 +746,104 @@ class MissionFSM(WindowRoomTraverse):
             return (f"id {self.target_marker_id} not visible"
                     + (f" (in view: {others})" if others else ""))
         return f"id {self.target_marker_id} IN SIGHT"
+
+    # ------------------------------------------------------- the lateral fix
+
+    def vio_odom_callback(self, msg):
+        """RTAB-Map's own odometry, used ONLY as a liveness/quality signal.
+
+        Nothing here is flown. The estimate the aircraft actually flies is
+        EKF2's, fused from what vio_to_px4_bridge forwards to
+        /fmu/in/vehicle_visual_odometry. This subscription exists to answer a
+        question EKF2 answers too slowly: has RTAB-Map stopped producing?
+
+        rtabmap_odom signals lost tracking by publishing a pose with an
+        enormous covariance rather than by going silent, so BOTH are checked
+        -- a stale topic and a null-covariance message mean the same thing
+        here, and neither should be flown on.
+        """
+        self.vio_odom_time = time.monotonic()
+        try:
+            self.vio_covariance = float(msg.pose.covariance[0])
+        except (AttributeError, IndexError):
+            self.vio_covariance = None
+
+    def vio_is_fresh(self):
+        """Is RTAB-Map still producing a usable fix?
+
+        The RTAB-Map bridge has no heartbeat topic of its own -- unlike
+        zed_localization, which publishes /vio_healthy -- so freshness is
+        measured on its INPUT, /rtabmap/odom. That is the better place to
+        measure it anyway: it distinguishes 'RTAB-Map lost tracking' from
+        'the bridge died', and it is the first of the two to go.
+        """
+        if self.vio_odom_time is None:
+            return self.ALLOW_MISSING_VIO_STATUS
+        if time.monotonic() - self.vio_odom_time > self.VIO_MAX_AGE:
+            return False
+        if (self.vio_covariance is not None
+                and self.vio_covariance > self.VIO_MAX_COVARIANCE):
+            return False
+        return True
+
+    def vision_is_fused(self):
+        """Is EKF2 actually fusing the external-vision estimate right now?
+
+        Called unbound off OffboardSequenceVio so the cs_ev_* flag logic has
+        one home in this package. It reads nothing but self.estimator_flags,
+        which is the base class's, so it is safe to borrow this way.
+        """
+        return OffboardSequenceVio.vision_is_fused(self)
+
+    def yaw_is_aligned(self):
+        """Has EKF2 resolved an absolute heading? Borrowed for the same reason."""
+        return OffboardSequenceVio.yaw_is_aligned(self)
+
+    def flow_is_healthy(self):
+        """Overridden: the lateral estimate is RTAB-Map VIO, not optical flow.
+
+        KEEPS THE BASE CLASS'S NAME ON PURPOSE. Every horizontal decision in
+        the inherited chain funnels through this one predicate -- the x/y
+        latch, whether a leg runs or is skipped, whether the window approach
+        may fly, whether the precision descent keeps its aligned point, the
+        status line. Overriding it here moves all of them onto vision without
+        editing a line of flight logic, and renaming it would fork the base
+        class for no gain. offboard_sequence_vio.py makes the same choice for
+        the same reason.
+
+        WHAT IS DELIBERATELY NOT TESTED
+        -------------------------------
+        dist_bottom and FLOW_MIN_AGL. Those gates exist because optical flow
+        cannot resolve a floor 15 cm from the lens, so the base class refuses
+        to believe x/y until the aircraft is above FLOW_MIN_AGL. The
+        RealSense is looking out across a room and works sitting on the
+        ground, so that floor is meaningless here -- and keeping it would
+        block the legs at exactly the low altitudes this mission flies.
+
+        The rangefinder is NOT dropped from the aircraft, only from this
+        predicate. It remains the height reference and a hard gate in
+        position_is_usable(), the arming checks and the descent. Vision that
+        dies costs the mission; a height estimate that dies costs the
+        aircraft.
+        """
+        if self.LATERAL_SOURCE == 'flow':
+            return super().flow_is_healthy()
+
+        lp = self.local_position
+        if lp is None or not lp.xy_valid or not lp.v_xy_valid:
+            return False
+        if not self.vio_is_fresh():
+            return False
+
+        fused = self.vision_is_fused()
+        if fused is None:
+            # No estimator flags published at all. xy_valid plus a live
+            # RTAB-Map stream is the only opinion available; weaker, but the
+            # alternative is refusing to fly on a healthy aircraft.
+            return True
+        # Losing yaw alignment unanchors the frame the latched x/y point was
+        # captured in, so a position setpoint flown against it walks away.
+        return bool(fused) and bool(self.yaw_is_aligned())
 
     # ------------------------------------------------------------ the clock
 
@@ -1643,7 +1803,9 @@ class MissionFSM(WindowRoomTraverse):
             self.current_stage,
             'ARM' if armed else 'DIS',
             f"{alt:.2f}" if alt is not None else 'nan',
-            'POS' if self.hold_xy else ('FLO' if self.flow_is_healthy() else '---'),
+            'POS' if self.hold_xy else (
+                ('VIO' if self.LATERAL_SOURCE == 'vio' else 'FLO')
+                if self.flow_is_healthy() else '---'),
             detail,
         ])
         self.status_pub.publish(msg)

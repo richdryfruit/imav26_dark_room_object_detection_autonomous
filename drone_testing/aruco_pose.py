@@ -201,7 +201,7 @@ def body_words(forward, right):
 class ArucoPose(Node):
 
     # ---- camera -----------------------------------------------------------
-    CAMERA_INDEX = 0
+    CAMERA_INDEX = 1
     # 4:3 on purpose. The vertical field of view is what decides how low the
     # vehicle can go before the marker stops fitting in the frame, and 4:3 is
     # markedly taller than 16:9 on this sensor: with a 0.80 m marker and a

@@ -60,6 +60,9 @@ def ros():
 class _LocalPosition:
     xy_valid = True
     z_valid = True
+    v_xy_valid = True
+    dist_bottom = 1.0
+    dist_bottom_valid = True
     x = 0.0
     y = 0.0
     z = -1.5
@@ -989,3 +992,102 @@ def test_the_traverse_does_not_depend_on_where_the_aircraft_stands(fsm):
     assert np.allclose(entry_a, entry_b)
     assert np.allclose(exit_a, exit_b)
     assert head_a == pytest.approx(head_b)
+
+
+# ------------------------------------------------- the lateral estimate (VIO)
+
+class _Flags:
+    """Minimal EstimatorStatusFlags stand-in."""
+    cs_ev_pos = True
+    cs_ev_vel = False
+    cs_ev_yaw_fault = False
+    cs_yaw_align = True
+    cs_rng_hgt = True
+    cs_rng_kin_consistent = True
+    cs_rng_fault = False
+    cs_rng_stuck = False
+    cs_rng_terrain = False
+
+
+def vio_ok(node, age=0.0, cov=1.0):
+    """Make the VIO stream look healthy `age` seconds ago.
+
+    Also drops the fixture's flow_is_healthy stub, so these tests exercise the
+    REAL predicate rather than the always-true stand-in the other tests want.
+    """
+    node.__dict__.pop('flow_is_healthy', None)
+    node.vio_odom_time = time.monotonic() - age
+    node.vio_covariance = cov
+    node.estimator_flags = _Flags()
+    node.local_position.xy_valid = True
+    node.local_position.v_xy_valid = True
+
+
+def test_the_legs_fly_on_vio_not_optical_flow(fsm):
+    assert fsm.LATERAL_SOURCE == 'vio'
+    assert fsm.VIO_ODOM_TOPIC == '/rtabmap/odom'
+
+
+def test_a_fresh_vio_fix_is_healthy(fsm):
+    vio_ok(fsm)
+    assert fsm.flow_is_healthy()
+
+
+def test_a_stale_vio_stream_is_not_healthy(fsm):
+    """rtabmap going quiet must read as 'no fix', not as a coasting estimate."""
+    vio_ok(fsm, age=fsm.VIO_MAX_AGE + 1.0)
+    assert not fsm.flow_is_healthy()
+
+
+def test_lost_tracking_covariance_is_not_healthy(fsm):
+    """rtabmap_odom signals lost tracking with a huge covariance, not silence."""
+    vio_ok(fsm, cov=9999.0)
+    assert not fsm.flow_is_healthy()
+
+
+def test_ekf_not_fusing_vision_is_not_healthy(fsm):
+    """xy_valid alone is EKF2 coasting on the IMU, not a corrected estimate."""
+    vio_ok(fsm)
+    f = _Flags()
+    f.cs_ev_pos = False
+    f.cs_ev_vel = False
+    fsm.estimator_flags = f
+    assert not fsm.flow_is_healthy()
+
+
+def test_lost_yaw_alignment_is_not_healthy(fsm):
+    """An unanchored heading makes the latched x/y point meaningless."""
+    vio_ok(fsm)
+    f = _Flags()
+    f.cs_yaw_align = False
+    fsm.estimator_flags = f
+    assert not fsm.flow_is_healthy()
+
+
+def test_no_estimator_flags_falls_back_to_the_stream(fsm):
+    """Weaker, but refusing to fly a healthy aircraft is worse."""
+    vio_ok(fsm)
+    fsm.estimator_flags = None
+    assert fsm.flow_is_healthy()
+
+
+def test_the_agl_floor_is_NOT_applied_to_vio(fsm):
+    """FLOW_MIN_AGL exists because flow cannot see a floor 15 cm away.
+
+    The RealSense looks out across a room, so that gate is meaningless here --
+    and keeping it would block the legs at exactly the low altitudes this
+    mission flies.
+    """
+    vio_ok(fsm)
+    fsm.local_position.dist_bottom = 0.05      # far below FLOW_MIN_AGL (0.30)
+    assert fsm.flow_is_healthy()
+
+
+def test_flow_can_be_restored_by_parameter(fsm):
+    """lateral_source:=flow must hand straight back to the inherited gate."""
+    vio_ok(fsm)
+    fsm.LATERAL_SOURCE = 'flow'
+    fsm.local_position.dist_bottom = 0.05
+    assert not fsm.flow_is_healthy(), "the inherited AGL floor should bite again"
+    fsm.local_position.dist_bottom = 1.0
+    assert fsm.flow_is_healthy()

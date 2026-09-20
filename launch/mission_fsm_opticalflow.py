@@ -308,13 +308,6 @@ def generate_launch_description():
                     'gate_yaw_deg': LaunchConfiguration('gate_yaw_deg'),
                     'gate_reset_count': LaunchConfiguration('gate_reset_count'),
                     'side_mismatch': LaunchConfiguration('side_mismatch'),
-                    # ---- where the lateral estimate comes from ----
-                    'lateral_source': LaunchConfiguration('lateral_source'),
-                    'vio_odom_topic': LaunchConfiguration('vio_odom_topic'),
-                    'vio_max_age': LaunchConfiguration('vio_max_age'),
-                    'vio_max_covariance': LaunchConfiguration('vio_max_covariance'),
-                    'allow_missing_vio_status': LaunchConfiguration(
-                        'allow_missing_vio_status'),
                     # ---- the altitude schedule ----
                     'cruise_altitude': LaunchConfiguration('cruise_altitude'),
                     'window_altitude_m': LaunchConfiguration('window_altitude_m'),
@@ -378,38 +371,6 @@ def generate_launch_description():
             description='Start the support stack but not the flight node, so '
                         'it can be run by hand and keep the q/k keyboard '
                         'aborts. false = fly the whole mission from here.'),
-
-        # ---- THE LATERAL ESTIMATE ----
-        #
-        # The legs between the markers are the longest unreferenced
-        # translations in the flight, and they are flown on RTAB-Map VIO.
-        # EKF2 on this airframe is vision=x/y, lidar=height, mag=heading,
-        # flow OFF -- so the inherited flow_is_healthy() would be gating on a
-        # sensor that is not even fused.
-        DeclareLaunchArgument(
-            'lateral_source', default_value='vio',
-            description='vio | flow. vio gates horizontal motion on RTAB-Map '
-                        'plus EKF2 cs_ev_* fusion and DROPS the FLOW_MIN_AGL '
-                        'floor, which exists only because optical flow cannot '
-                        'see a floor 15 cm away. flow restores the inherited '
-                        'ARK Flow predicate unchanged.'),
-        DeclareLaunchArgument(
-            'vio_odom_topic', default_value='/rtabmap/odom',
-            description="RTAB-Map's odometry, used as a LIVENESS signal only. "
-                        'The aircraft flies EKF2\'s fused estimate; this is '
-                        'measured on the bridge INPUT so that "RTAB-Map lost '
-                        'tracking" is distinguishable from "the bridge died".'),
-        DeclareLaunchArgument('vio_max_age', default_value='0.5',
-                              description='s. Older than this is not a fix.'),
-        DeclareLaunchArgument(
-            'vio_max_covariance', default_value='100.0',
-            description='rtabmap_odom signals lost tracking with a covariance '
-                        'around 9999 rather than by going silent, so both a '
-                        'stale topic and a huge covariance read as no fix.'),
-        DeclareLaunchArgument(
-            'allow_missing_vio_status', default_value='true',
-            description='No /rtabmap/odom at all -> fall back to EKF2\'s own '
-                        'cs_ev_* opinion rather than refusing to fly.'),
 
         # ---- THE ALTITUDE SCHEDULE ----
         #
