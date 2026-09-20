@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../imav26-ws-2/ws_ros2/src/drone_testing"
+		}
+	],
+	"settings": {}
+}

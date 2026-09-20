@@ -76,8 +76,8 @@ work. Your RC kill switch is the real safety net regardless.
 """
 
 from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription,
-                            TimerAction)
+from launch.actions import (DeclareLaunchArgument, GroupAction,
+                            IncludeLaunchDescription, TimerAction)
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -104,14 +104,36 @@ def generate_launch_description():
     # file is replacing. Forwarding is left on (the default) so every window,
     # room, camera and doll argument declared below reaches it without being
     # listed twice.
-    support = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(PathJoinSubstitution([
-            FindPackageShare('drone_testing'),
-            'launch', 'window_room_traverse.launch.py'])),
-        launch_arguments={
-            'agent_only': 'true',
-        }.items(),
-    )
+    # SCOPED, and this is not cosmetic.
+    #
+    # IncludeLaunchDescription does NOT push a scope. Its `launch_arguments`
+    # are implemented as bare SetLaunchConfiguration actions emitted into the
+    # SHARED context, so pinning agent_only:='true' for the include also
+    # rewrites agent_only for THIS file -- and the flight node below, which is
+    # visited after the include and gated UnlessCondition(agent_only), then
+    # reads 'true' and is silently skipped. You pass agent_only:=false, the
+    # support stack comes up, and nothing ever flies, with no error printed.
+    #
+    # GroupAction(scoped=True, forwarding=True) pushes the configurations
+    # before the include and pops them after: everything declared here is
+    # still visible to the include (forwarding), but the include's own sets
+    # die with the group.
+    #
+    # NOTE: window_room_traverse.launch.py has this same bug against
+    # window_traverse.launch.py -- `support` is listed before its flight node,
+    # which is also UnlessCondition(agent_only) -- so `agent_only:=false` does
+    # not start a flight node there either. It goes unnoticed because the
+    # documented workflow is to run the flight node by hand in a second pane.
+    support = GroupAction([
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(PathJoinSubstitution([
+                FindPackageShare('drone_testing'),
+                'launch', 'window_room_traverse.launch.py'])),
+            launch_arguments={
+                'agent_only': 'true',
+            }.items(),
+        ),
+    ], scoped=True, forwarding=True)
 
     # ---- the landing marker ------------------------------------------------
     #
@@ -148,6 +170,30 @@ def generate_launch_description():
             )
         ],
         condition=IfCondition(LaunchConfiguration('pad_detect')),
+    )
+
+    # ---- the doll count, in this terminal ---------------------------------
+    #
+    # doll_count_gui is the OTHER display and is deliberately not started
+    # here: it is a curses application, so it owns a terminal and needs a real
+    # tty, and launch hands its processes a pipe. Run it yourself in a second
+    # pane when you want the big number:
+    #
+    #     ros2 run drone_testing doll_count_gui
+    #
+    # Both read /doll_count and apply the same default offset, so the two
+    # never disagree.
+    doll_text_node = Node(
+        package='drone_testing',
+        executable='doll_report_text',
+        name='doll_report_text',
+        output='screen',
+        emulate_tty=True,
+        parameters=[{
+            'offset': LaunchConfiguration('doll_offset'),
+            'period': LaunchConfiguration('doll_report_period'),
+        }],
+        condition=IfCondition(LaunchConfiguration('doll_text')),
     )
 
     # ---- the flight -------------------------------------------------------
@@ -259,20 +305,51 @@ def generate_launch_description():
                     'gate_yaw_deg': LaunchConfiguration('gate_yaw_deg'),
                     'gate_reset_count': LaunchConfiguration('gate_reset_count'),
                     'side_mismatch': LaunchConfiguration('side_mismatch'),
-                    # ---- the two navigation legs ----
-                    'outbound_sequence': LaunchConfiguration('outbound_sequence'),
-                    'pad_sequence': LaunchConfiguration('pad_sequence'),
+                    # ---- the altitude schedule ----
+                    'cruise_altitude': LaunchConfiguration('cruise_altitude'),
+                    'window_altitude_m': LaunchConfiguration('window_altitude_m'),
+                    'room_altitude': LaunchConfiguration('room_altitude'),
+                    'alt_change_timeout': LaunchConfiguration('alt_change_timeout'),
+                    # ---- the window search failsafe ----
+                    'window_search_seconds': LaunchConfiguration(
+                        'window_search_seconds'),
+                    'window_sweep_deg': LaunchConfiguration('window_sweep_deg'),
+                    'window_backoff': LaunchConfiguration('window_backoff'),
+                    'window_max_backoffs': LaunchConfiguration(
+                        'window_max_backoffs'),
+                    # ---- the missed-marker failsafe ----
+                    'marker_retry_altitude': LaunchConfiguration(
+                        'marker_retry_altitude'),
+                    'marker_retry_seconds': LaunchConfiguration(
+                        'marker_retry_seconds'),
+                    'marker_retry_distance': LaunchConfiguration(
+                        'marker_retry_distance'),
+                    'marker_max_retries': LaunchConfiguration(
+                        'marker_max_retries'),
+                    # ---- the markers ----
+                    'window_marker_id': LaunchConfiguration('window_marker_id'),
+                    'turn_marker_id': LaunchConfiguration('turn_marker_id'),
+                    'pad_marker_id': LaunchConfiguration('pad_marker_id'),
+                    # ---- the four marker-terminated legs ----
+                    'outbound_distance': LaunchConfiguration('outbound_distance'),
+                    'window_offset': LaunchConfiguration('window_offset'),
+                    'window_offset_direction': LaunchConfiguration(
+                        'window_offset_direction'),
+                    'return_distance': LaunchConfiguration('return_distance'),
+                    'turn_distance': LaunchConfiguration('turn_distance'),
+                    'pad_distance': LaunchConfiguration('pad_distance'),
                     'leg_speed': LaunchConfiguration('leg_speed'),
-                    'leg_hold_seconds': LaunchConfiguration('leg_hold_seconds'),
-                    # ---- the landing pad ----
-                    'pad_align_tolerance': LaunchConfiguration('pad_align_tolerance'),
-                    'pad_align_settle_seconds': LaunchConfiguration(
-                        'pad_align_settle_seconds'),
-                    'pad_align_gain': LaunchConfiguration('pad_align_gain'),
-                    'pad_hold_seconds': LaunchConfiguration('pad_hold_seconds'),
-                    'pad_search_seconds': LaunchConfiguration('pad_search_seconds'),
-                    'pad_align_timeout': LaunchConfiguration('pad_align_timeout'),
-                    'pad_on_fail': LaunchConfiguration('pad_on_fail'),
+                    'leg_settle_seconds': LaunchConfiguration('leg_settle_seconds'),
+                    'leg_latch_timeout': LaunchConfiguration('leg_latch_timeout'),
+                    'leg_timeout_margin': LaunchConfiguration('leg_timeout_margin'),
+                    # ---- centring on a marker ----
+                    'marker_tolerance': LaunchConfiguration('marker_tolerance'),
+                    'marker_settle_seconds': LaunchConfiguration(
+                        'marker_settle_seconds'),
+                    'marker_gain': LaunchConfiguration('marker_gain'),
+                    'marker_hold_seconds': LaunchConfiguration('marker_hold_seconds'),
+                    'marker_align_timeout': LaunchConfiguration(
+                        'marker_align_timeout'),
                     'marker_max_age': LaunchConfiguration('marker_max_age'),
                     'marker_lost_seconds': LaunchConfiguration('marker_lost_seconds'),
                     'precision_descent': LaunchConfiguration('precision_descent'),
@@ -292,68 +369,223 @@ def generate_launch_description():
                         'it can be run by hand and keep the q/k keyboard '
                         'aborts. false = fly the whole mission from here.'),
 
-        # ---- THE TWO NAVIGATION LEGS ----
+        # ---- THE ALTITUDE SCHEDULE ----
         #
-        # Body-frame, relative to the yaw held since arming, in exactly the
-        # grammar offboard_sequence parses. Empty skips the leg, which is how
-        # this file degrades into plain window_room_traverse plus a pad
-        # landing for a rehearsal.
+        # Two heights, and the whole flight is at one or the other. NOTE that
+        # takeoff_altitude is IGNORED by this node: the climb goes to
+        # cruise_altitude, because there is one height for the marker phases
+        # and this is it.
         DeclareLaunchArgument(
-            'outbound_sequence', default_value='',
-            description='Arming point -> in front of the window, e.g. '
-                        '"forward 3.0, right 1.5, yaw 15". The window sweep '
-                        'centres its yaw cone on the heading it STARTS from, '
-                        'so this leg has to finish facing the window wall. '
-                        'forward/backward/left/right/yaw only; up/down are '
-                        'rejected (use altitude_offset). Empty = skip, and '
-                        'sweep from the arming point.'),
+            'cruise_altitude', default_value='2.50',
+            description='m for the climb, every leg and the landing. The down '
+                        'camera basket is +/- h*tan(39 deg), so 2.50 m gives '
+                        'about +/-2.0 m of capture width for the markers.'),
         DeclareLaunchArgument(
-            'pad_sequence', default_value='',
-            description='Outside the window -> OVER the landing pad, e.g. '
-                        '"backward 2.0, left 4.0". Must put the marker inside '
-                        'the down-camera footprint: the pad search does not '
-                        'sweep. Empty = skip, and look for the marker from '
-                        'wherever the outbound traversal ended.'),
+            'window_altitude_m', default_value='1.75',
+            description='m dropped to on the FIRST sighting of the window '
+                        'marker, and climbed back out of on the second. The '
+                        'dark room is NOT on this schedule -- its heights come '
+                        'from the measured window pose via window_altitude().'),
+        DeclareLaunchArgument(
+            'room_altitude', default_value='1.75',
+            description='m the dark-room box pattern is flown at. NOT the '
+                        'traverse height -- the traversal is lined up on the '
+                        'measured window pose and goes through wherever the '
+                        'aperture is. This is the height it levels off at '
+                        'once inside.'),
+        DeclareLaunchArgument('alt_change_timeout', default_value='25.0',
+                              description='s before a climb or descent gives '
+                                          'up and carries on from where it '
+                                          'got to. The height is a preference; '
+                                          'the mission outranks it.'),
+
+        # ---- THE WINDOW SEARCH FAILSAFE ----
+        #
+        # Normally the strafe puts the aircraft on the axis and the window is
+        # simply there. This is the ladder for when it is not.
+        DeclareLaunchArgument(
+            'window_search_seconds', default_value='12.0',
+            description='s of looking before climbing a rung of the failsafe.'),
+        DeclareLaunchArgument(
+            'window_sweep_deg', default_value='30.0',
+            description='deg either side for rung 1 -- yaw left, centre, '
+                        'right. This is SCAN\'s own sweep, which '
+                        'window_traverse disables by setting the span to zero.'),
+        DeclareLaunchArgument(
+            'window_backoff', default_value='0.30',
+            description='m straight back per rung after the sweep. Seeing '
+                        'NOTHING (as opposed to a truncated quad, which is '
+                        'RECENTRE\'s job) usually means standing too close '
+                        'for the aperture to fit the frame -- about 1.26 x '
+                        'the window height is needed. Yawing cannot fix that; '
+                        'backing off is the only thing that can. The traversal '
+                        'needs NO compensation for it: approach_points() '
+                        'builds both ends from the window pose, so backing off '
+                        'moves where the approach starts, not where it ends.'),
+        DeclareLaunchArgument(
+            'window_max_backoffs', default_value='2',
+            description='rungs of backoff before the attempt is abandoned. '
+                        'Two is enough because the aperture already fits from '
+                        'the marker: a 0.60 m window needs 0.76 m of depth '
+                        'and the marker stands 1.00 m from the wall.'),
+
+        # ---- THE MISSED-MARKER FAILSAFE ----
+        #
+        # A leg that runs out of distance without its marker has almost
+        # certainly drifted -- ten metres on optical flow with nothing
+        # correcting it. The down camera basket is +/- h*tan(39 deg), so the
+        # cheapest fix is height:
+        #
+        #     1.75 m -> +/-1.42 m    2.50 m -> +/-2.02 m    3.50 m -> +/-2.83 m
+        #
+        # Runs before any per-leg fallback, so it covers the course legs and
+        # the pad leg alike. It matters most for the pad: without it one
+        # missed detection is a landing off the pad and nothing left to try.
+        DeclareLaunchArgument(
+            'marker_retry_altitude', default_value='3.50',
+            description='m climbed to for a second look. The MAXIMUM height '
+                        'this mission flies at -- keep max_altitude above it.'),
+        DeclareLaunchArgument('marker_retry_seconds', default_value='8.0',
+                              description='s hovering at that height before '
+                                          'retracing.'),
+        DeclareLaunchArgument(
+            'marker_retry_distance', default_value='4.0',
+            description='m retraced BACK along the leg at the retry altitude, '
+                        'still watching. Backwards because a leg that ran out '
+                        'of distance overshot or drifted, so the marker is '
+                        'behind where it stopped. Bounded rather than the '
+                        'whole leg: a full retrace costs the flight clock '
+                        'twice over.'),
+        DeclareLaunchArgument(
+            'marker_max_retries', default_value='0',
+            description='Elevated searches per leg. ZERO by default: a leg '
+                        'that reaches its limit without its marker STOPS '
+                        'THERE and moves on -- the roll stops at '
+                        'turn_distance, and the pad leg lands. Set to 1 to '
+                        're-enable the climb-and-look failsafe described by '
+                        'the three arguments above, which is built and '
+                        'tested but off.'),
+
+        # ---- THE MARKERS ----
+        #
+        # id 0 is the takeoff pad and is not used by this node. These three
+        # MUST differ -- the flight node refuses to construct otherwise, and
+        # the reason is in its header: the left strafe looks for the turn
+        # marker while the window marker is still under the camera, so a
+        # shared id ends that leg before it starts.
+        DeclareLaunchArgument(
+            'window_marker_id', default_value='2',
+            description='ArUco id of the marker in front of the window. '
+                        'Ends the outbound leg AND the return leg.'),
+        DeclareLaunchArgument(
+            'turn_marker_id', default_value='3',
+            description='ArUco id of the marker the LEFT strafe ends on.'),
+        DeclareLaunchArgument(
+            'pad_marker_id', default_value='1',
+            description='ArUco id of the landing pad. The only required '
+                        'marker: without it the aircraft lands off the pad.'),
+
+        # ---- THE FOUR MARKER-TERMINATED LEGS ----
+        #
+        # Each distance is a LIMIT, not a target. A leg ends when its marker
+        # appears; the distance is how far it will go before giving up and
+        # holding. Set them a little LONGER than the real spacing, so flow
+        # error cannot stop the aircraft short of a marker it would have seen.
+        DeclareLaunchArgument(
+            'outbound_distance', default_value='10.0',
+            description='m FORWARD from the arming point, looking for '
+                        'window_marker_id. If it never appears the leg ends '
+                        'here and the WINDOW SEARCH starts anyway -- the '
+                        'window is the real landmark and the marker only '
+                        'refines the approach to it.'),
+        DeclareLaunchArgument(
+            'window_offset', default_value='0.25',
+            description='m sideways from the window marker to the window\'s '
+                        'CENTRE-LINE. MEASURE IT. The aircraft strafes this '
+                        'far onto the axis before the sweep, and mirrors it '
+                        'on the way out -- the marker is outside the down '
+                        'camera footprint (about +/-0.95 m at 1.2 m) from the '
+                        'axis, so without the mirror the return leg never '
+                        'sees it. 0.0 disables both strafes and approaches '
+                        'obliquely from the marker. MEASURED: 0.25 m.'),
+        DeclareLaunchArgument(
+            'window_offset_direction', default_value='left',
+            description='left | right, in the TAKEOFF frame. Which way the '
+                        'window centre-line lies from its marker. The mirror '
+                        'strafe on the way out is the opposite of this.'),
+        DeclareLaunchArgument(
+            'return_distance', default_value='10.0',
+            description='m BACKWARD from the window, looking for '
+                        'window_marker_id again. Backward because directions '
+                        'are in the TAKEOFF frame: the airframe is facing '
+                        'back down the course after the room, but that is a '
+                        'heading, not a frame, and forward here would fly it '
+                        'straight back into the room. Only ~3 m is ever '
+                        'flown; the rest is margin.'),
+        DeclareLaunchArgument(
+            'turn_distance', default_value='5.4',
+            description='m LEFT (takeoff frame) from the window marker, '
+                        'looking for '
+                        'turn_marker_id. MEASURE THIS ONE -- it is the only '
+                        'leg with no natural 11 m to fall back on.'),
+        DeclareLaunchArgument(
+            'pad_distance', default_value='10.0',
+            description='m BACKWARD (takeoff frame) from the turn marker, '
+                        'looking for pad_marker_id. This lands the aircraft '
+                        'level with the takeoff pad and turn_distance to its '
+                        'left.'),
         DeclareLaunchArgument(
             'leg_speed', default_value='0.30',
-            description='m/s the carrot is walked at on a leg. Keep it slow: '
-                        'these are the longest translations in the flight and '
-                        'optical flow is the only thing measuring them.'),
-        DeclareLaunchArgument(
-            'leg_hold_seconds', default_value='3.0',
-            description='s of settling at the end of a leg, before the window '
-                        'sweep or the marker search starts.'),
+            description='m/s on a leg. Slow on purpose: the down camera has '
+                        'to have time to see a marker pass beneath it, and '
+                        'flow is the only thing measuring these translations.'),
+        DeclareLaunchArgument('leg_settle_seconds', default_value='2.0',
+                              description='s of settling at the end of a leg '
+                                          'that ran out of distance.'),
+        DeclareLaunchArgument('leg_latch_timeout', default_value='20.0',
+                              description='s waiting for a flow-healthy x/y '
+                                          'latch before a leg is given up.'),
+        DeclareLaunchArgument('leg_timeout_margin', default_value='30.0',
+                              description='s allowed on top of distance/speed '
+                                          'before a leg is called stuck.'),
 
+        # ---- THE DOLL COUNT IN THIS TERMINAL ----
+        DeclareLaunchArgument(
+            'doll_text', default_value='true',
+            description='Print the geotagged count and doll positions as log '
+                        'lines. Works under launch, unlike doll_count_gui, '
+                        'which is curses and needs a tty (second pane).'),
+        DeclareLaunchArgument(
+            'doll_offset', default_value='2',
+            description='Display-side subtraction, the same default '
+                        'doll_count_gui uses so the two agree. The raw count '
+                        'is printed alongside and nothing upstream changes.'),
+        DeclareLaunchArgument('doll_report_period', default_value='10.0',
+                              description='s between heartbeat prints.'),
+
+        # ---- CENTRING ON A MARKER ----
         # ---- THE LANDING PAD ----
         DeclareLaunchArgument(
             'pad_detect', default_value='true',
             description='Start aruco_pose (the down-facing camera). false if '
                         'you are running it by hand.'),
         DeclareLaunchArgument(
-            'pad_align_tolerance', default_value='0.15',
+            'marker_tolerance', default_value='0.15',
             description='m radius that counts as being over the marker.'),
-        DeclareLaunchArgument('pad_align_settle_seconds', default_value='1.5',
+        DeclareLaunchArgument('marker_settle_seconds', default_value='1.5',
                               description='s inside the radius before it is '
                                           'believed. One sample inside 15 cm '
                                           'is corner noise, not an arrival.'),
         DeclareLaunchArgument(
-            'pad_align_gain', default_value='0.6',
+            'marker_gain', default_value='0.6',
             description='Fraction of the measured offset commanded per cycle. '
                         'Must be in (0, 1]: below 1 the loop is monotone, '
                         'above 1 it overshoots by design.'),
-        DeclareLaunchArgument('pad_hold_seconds', default_value='5.0',
+        DeclareLaunchArgument('marker_hold_seconds', default_value='5.0',
                               description='s station keeping over the marker '
                                           'before the descent commits.'),
-        DeclareLaunchArgument('pad_search_seconds', default_value='25.0',
-                              description='s looking for the marker before '
-                                          'giving up.'),
-        DeclareLaunchArgument('pad_align_timeout', default_value='45.0',
+        DeclareLaunchArgument('marker_align_timeout', default_value='45.0',
                               description='s trying to centre before giving up.'),
-        DeclareLaunchArgument(
-            'pad_on_fail', default_value='land',
-            description="land | hold. What a pad timeout does. 'land' means "
-                        'land here, OFF the pad, which beats hovering until '
-                        'the battery decides where to land for you.'),
         DeclareLaunchArgument('marker_max_age', default_value='0.5',
                               description='s. Older than this reads as "no '
                                           'marker": a dead camera goes quiet, '
@@ -392,7 +624,6 @@ def generate_launch_description():
         DeclareLaunchArgument('pad_camera_fps', default_value='30.0'),
         DeclareLaunchArgument('pad_detect_rate', default_value='20.0',
                               description='Hz the newest frame is processed at.'),
-        DeclareLaunchArgument('pad_marker_id', default_value='0'),
         DeclareLaunchArgument('pad_marker_size', default_value='0.80',
                               description='Marker edge length in metres. Must '
                                           'be right: it sets the metric scale '
@@ -483,7 +714,10 @@ def generate_launch_description():
                                           'pattern turns at.'),
         DeclareLaunchArgument('takeoff_return_to_pad', default_value='false'),
         DeclareLaunchArgument('min_altitude', default_value='0.4'),
-        DeclareLaunchArgument('max_altitude', default_value='3.0'),
+        DeclareLaunchArgument('max_altitude', default_value='4.0',
+                              description='m ceiling. Raised above the 3.0 m default because\n                                          '
+                                          'the missed-marker failsafe deliberately climbs to\n                                          '
+                                          'marker_retry_altitude (3.50 m).'),
         DeclareLaunchArgument('scan_span_deg', default_value='20.0'),
         DeclareLaunchArgument('scan_yaw_rate', default_value='0.05'),
         DeclareLaunchArgument('scan_direction', default_value='right'),
@@ -652,5 +886,6 @@ def generate_launch_description():
 
         support,
         aruco_node,
+        doll_text_node,
         flight_node,
     ])

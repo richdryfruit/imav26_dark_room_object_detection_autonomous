@@ -323,6 +323,17 @@ class ArucoPose(Node):
         self.point_pub = self.create_publisher(PointStamped, '/aruco/point', 10)
         self.info_pub = self.create_publisher(String, '/aruco/info', 10)
 
+        # EVERY visible marker, one message each, with the id in frame_id as
+        # "aruco:<id>". The three topics above describe one marker -- the
+        # configured marker_id -- and say nothing about which marker a
+        # detection belongs to, which is all precision_land ever needs and is
+        # deliberately left exactly as it was. A mission that visits several
+        # different markers in sequence needs to tell them apart, and that is
+        # what this topic is for: the subscriber filters on the id and can
+        # never act on a fix from the wrong pad.
+        self.marker_points_pub = self.create_publisher(
+            PointStamped, '/aruco/marker_points', 10)
+
         self.cap = cv2.VideoCapture(self.camera_index)
         if not self.cap.isOpened():
             raise SystemExit(f"Could not open camera {self.camera_index}.")
@@ -425,13 +436,34 @@ class ArucoPose(Node):
 
         pose = None
         quad = None
-        if self.marker_id in seen:
-            c = corners[seen.index(self.marker_id)].reshape(4, 2).astype(np.float64)
-            found, rvec, tvec = cv2.solvePnP(self.objp, c, self.K, self.D,
-                                             flags=cv2.SOLVEPNP_IPPE_SQUARE)
-            if found:
-                pose = tuple(float(v) for v in R_CF @ tvec.reshape(3))
-                quad = c
+
+        # Solve every marker in the frame, not just the configured one, and
+        # publish each on /aruco/marker_points tagged with its id. All markers
+        # are assumed to be marker_size across -- self.objp is built from that
+        # one number, and a marker of a different physical size solved against
+        # it comes out at the wrong RANGE, which would put the vehicle over
+        # the wrong point. If mixed sizes ever appear on the course this is
+        # the line that has to grow a per-id table.
+        now = self.get_clock().now().to_msg()
+        for idx, mid in enumerate(seen):
+            c_any = corners[idx].reshape(4, 2).astype(np.float64)
+            ok, _, t_any = cv2.solvePnP(self.objp, c_any, self.K, self.D,
+                                        flags=cv2.SOLVEPNP_IPPE_SQUARE)
+            if not ok:
+                continue
+            px, py, pz = (float(v) for v in R_CF @ t_any.reshape(3))
+            m = PointStamped()
+            m.header.stamp = now
+            m.header.frame_id = f'aruco:{int(mid)}'
+            m.point.x, m.point.y, m.point.z = px, py, pz
+            self.marker_points_pub.publish(m)
+            # `pose is None` keeps the legacy behaviour exactly: the old code
+            # used seen.index(), which takes the FIRST occurrence. A duplicate
+            # id in one frame is pathological, but it must not quietly change
+            # which corner set precision_land is flown on.
+            if mid == self.marker_id and pose is None:
+                pose = (px, py, pz)
+                quad = c_any
 
         self._update_debounce(pose is not None)
 
