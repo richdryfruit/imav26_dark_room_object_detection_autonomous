@@ -485,8 +485,12 @@ def _setup(context):
     # wall_localizer -> pose_kf -> /lidar/odom_kf, which the room scan flies on.
     # Real-arena config (2.5 m room, 0.135 m mount). use_sim_time as in
     # lidar_loc's own sitl_lidar.launch.py.
+    # 'arena' = the real 2.5 m room (lidar_arena.yaml); 'sim' = lidar_loc's
+    # config for the 2.2x imav2026_scaled world (5.41 m room). Either way the
+    # mount is the sim drone's (0.135 m above the body).
     arena = os.path.join(get_package_share_directory('lidar_loc'), 'config',
-                         'lidar_arena.yaml')
+                         'lidar_rplidar.yaml' if arg('lidar_config') == 'sim'
+                         else 'lidar_arena.yaml')
     lidar_on = IfCondition(arg('lidar'))
     lidar = [
         Node(package='lidar_loc', executable='gz_lidar_node', name='gz_lidar_node',
@@ -499,7 +503,8 @@ def _setup(context):
                           'use_sim_time': False}]),
         Node(package='lidar_loc', executable='scan_leveler', name='scan_leveler',
              output='screen', condition=lidar_on,
-             parameters=[arena, {'use_sim_time': True}]),
+             parameters=[arena, {'use_sim_time': True,
+                                 'mount_xyz': [0.0, 0.0, 0.135]}]),
         # Heading from the compass, not the window-gap signature: the gap
         # test picked the wrong wall family here (fix 0.8 m out, frame
         # flipping). seed_yaw_offset = EKF2 heading of arena +X (east) = +90.
@@ -539,6 +544,8 @@ def generate_launch_description():
         DeclareLaunchArgument('window_scale', default_value='1.0',
                               description='Blue opening size x this (measured 0.60 m). '
                                           'It is moved to stay inside the 2.5 m wall.'),
+        DeclareLaunchArgument('lidar_config', default_value='arena',
+                              description="arena (real 2.5 m room) | sim (imav2026_scaled, 5.41 m)"),
         DeclareLaunchArgument('lidar_yaw_source', default_value='imu',
                               description='wall_localizer yaw_source (auto|imu|windows|boot|fixed).'),
         DeclareLaunchArgument('lidar_seed_yaw', default_value='1.5708',
