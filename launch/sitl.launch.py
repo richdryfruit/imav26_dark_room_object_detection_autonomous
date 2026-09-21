@@ -539,7 +539,7 @@ def _setup(context):
                                  'mount_xyz': [0.0, 0.0, 0.135]}]),
         # Heading from the compass, not the window-gap signature: the gap
         # test picked the wrong wall family here (fix 0.8 m out, frame
-        # flipping). seed_yaw_offset = EKF2 heading of arena +X (east) = +90.
+        # flipping). seed_yaw_offset is 0 in SITL (arena axes = Gazebo ENU).
         Node(package='lidar_loc', executable='wall_localizer', name='wall_localizer',
              output='screen', condition=lidar_on,
              parameters=[arena, {'use_sim_time': True,
@@ -585,8 +585,8 @@ def generate_launch_description():
                               description="arena (real 2.5 m room) | sim (imav2026_scaled, 5.41 m)"),
         DeclareLaunchArgument('lidar_yaw_source', default_value='imu',
                               description='wall_localizer yaw_source (auto|imu|windows|boot|fixed).'),
-        DeclareLaunchArgument('lidar_seed_yaw', default_value='1.5708',
-                              description='EKF2 heading of arena +X (east), rad, for yaw_source imu.'),
+        DeclareLaunchArgument('lidar_seed_yaw', default_value='0.0',
+                              description='wall_localizer seed_yaw_offset, rad. 0 in SITL: arena axes are Gazebo ENU (verified to 1 cm against ground truth). On the aircraft: the compass heading of the room axes, measured.'),
         DeclareLaunchArgument('light_scale', default_value='0.5',
                               description='Multiplier on every light in the world '
                                           '(1 = as authored). The dark room is dim.'),
