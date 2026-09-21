@@ -129,6 +129,11 @@ def _setup(context):
         'EKF2_EV_CTRL': 0,
         # No power module in SITL ("system power unavailable").
         'CBRK_SUPPLY_CHK': 894281,
+        # PX4's land detector only accepts touchdown while the descent
+        # setpoint is >= 0.9 * MPC_LAND_SPEED. The missions land at 0.10 m/s
+        # (slow_land_speed), so at the 0.7 default PX4 never agrees it has
+        # landed and refuses the disarm. SET THE SAME ON THE AIRCRAFT.
+        'MPC_LAND_SPEED': 0.1,
     }
     env_params = ' '.join(f'PX4_PARAM_{k}={v}' for k, v in params.items())
     set_params = '; '.join(f'bin/px4-param set {k} {v}' for k, v in params.items())
