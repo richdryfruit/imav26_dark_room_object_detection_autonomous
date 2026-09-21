@@ -818,8 +818,13 @@ class OffboardSequence(Node):
         if f is None:
             lp = self.local_position
             return lp is not None and lp.dist_bottom_valid
-        return (f.cs_rng_hgt or f.cs_rng_terrain) and not f.cs_rng_fault \
-            and not f.cs_rng_stuck and f.cs_rng_kin_consistent
+        # getattr: older px4_msgs (e.g. a laptop SITL build) lack some of
+        # these fields. A missing one reads as the benign value.
+        flag = lambda name, default: bool(getattr(f, name, default))  # noqa: E731
+        return ((flag('cs_rng_hgt', False) or flag('cs_rng_terrain', False))
+                and not flag('cs_rng_fault', False)
+                and not flag('cs_rng_stuck', False)
+                and flag('cs_rng_kin_consistent', True))
 
     def position_is_usable(self):
         """What we need to fly at all: a height estimate and a rangefinder.
@@ -1048,7 +1053,7 @@ class OffboardSequence(Node):
                                   "free-run. Reboot the flight controller, or fly it up "
                                   "and down faster than 0.5 m/s in Position mode to let "
                                   "the check re-latch")
-                    elif not (f.cs_rng_hgt or f.cs_rng_terrain):
+                    elif not (f.cs_rng_hgt or getattr(f, "cs_rng_terrain", False)):
                         reason = ("EKF2 is not fusing the rangefinder at all "
                                   "(cs_rng_hgt and cs_rng_terrain both false) -- "
                                   "check EKF2_RNG_CTRL and that the sensor is on the bus")
