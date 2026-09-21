@@ -219,7 +219,8 @@ class DollDetect(Node):
         #               depth along the optical axis is the height above the
         #               floor, which the TFmini measures (dist_bottom), minus
         #               target_height (the doll's centre above the floor).
-        #               Mount it with cam_pitch -90 deg (image-up = nose).
+        #               Mount it with cam_pitch +1.5708 (+90 deg in this
+        #               node's convention: optical axis down, image-up = nose).
         self.depth_source = str(self.declare_parameter(
             'depth_source', 'image').value).strip().lower()
         if self.depth_source not in ('image', 'rangefinder'):
