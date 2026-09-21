@@ -656,7 +656,7 @@ def generate_launch_description():
         # holding. Set them a little LONGER than the real spacing, so flow
         # error cannot stop the aircraft short of a marker it would have seen.
         DeclareLaunchArgument(
-            'outbound_distance', default_value='11.0',
+            'outbound_distance', default_value='9.3',
             description='m FORWARD from the arming point, looking for '
                         'window_marker_id. If it never appears the leg ends '
                         'here and the WINDOW SEARCH starts anyway -- the '
@@ -687,13 +687,13 @@ def generate_launch_description():
                         'straight back into the room. Only ~3 m is ever '
                         'flown; the rest is margin.'),
         DeclareLaunchArgument(
-            'turn_distance', default_value='5.4',
+            'turn_distance', default_value='5.0',
             description='m LEFT (takeoff frame) from the window marker, '
                         'looking for '
                         'turn_marker_id. MEASURE THIS ONE -- it is the only '
                         'leg with no natural 11 m to fall back on.'),
         DeclareLaunchArgument(
-            'pad_distance', default_value='11.0',
+            'pad_distance', default_value='9.3',
             description='m BACKWARD (takeoff frame) from the turn marker, '
                         'looking for pad_marker_id. This lands the aircraft '
                         'level with the takeoff pad and turn_distance to its '
@@ -900,7 +900,7 @@ def generate_launch_description():
                         'single-traversal default: two approaches, two '
                         'traversals and a six-leg pattern do not fit in 150 s.'),
         DeclareLaunchArgument('request_offboard_from_ros', default_value='true'),
-        DeclareLaunchArgument('standoff_distance', default_value='1.0'),
+        DeclareLaunchArgument('standoff_distance', default_value='1.67'),
         DeclareLaunchArgument(
             'inside_distance', default_value='0.80',
             description='m past the window plane the INBOUND run ends: how '
@@ -909,7 +909,7 @@ def generate_launch_description():
                         'room the pattern needs and whether the window is '
                         'still in frame from inside.'),
         DeclareLaunchArgument(
-            'outside_distance', default_value='1.00',
+            'outside_distance', default_value='1.67',
             description='m past the window plane the OUTBOUND run ends.'),
         DeclareLaunchArgument('altitude_offset', default_value='0.0'),
         DeclareLaunchArgument('gear_below_camera', default_value='0.120'),

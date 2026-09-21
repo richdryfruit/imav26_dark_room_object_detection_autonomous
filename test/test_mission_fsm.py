@@ -828,9 +828,11 @@ def test_the_leg_limits(fsm):
     exit ends directly over the window marker and an 11 m limit there would
     fly a missed marker back to the net."""
     d = {leg.name: leg.distance for leg in fsm.legs}
-    assert d['outbound'] == pytest.approx(11.0)
-    assert d['pad'] == pytest.approx(11.0)
-    assert d['turn'] == pytest.approx(5.4)
+    # Measured: marker-to-marker 8.8-8.9 m on the straight legs, 4.35 m on the
+    # roll. The limits are a margin past the marker, never a target.
+    assert d['outbound'] == pytest.approx(9.3)
+    assert d['pad'] == pytest.approx(9.3)
+    assert d['turn'] == pytest.approx(5.0)
     assert d['return'] == pytest.approx(2.0)
 
 
@@ -1360,3 +1362,34 @@ def test_a_degenerate_fix_does_not_refresh_a_good_one(fsm):
     fsm.lidar_odom_callback(_lidar_msg(9.0, 9.0, 100.0))
     assert fsm.lidar_fix_time == good_time
     assert fsm.lidar_fix[0] == pytest.approx(1.0), "position must not change"
+
+
+
+def test_the_room_square_is_safe_at_the_REAL_window_position(fsm):
+    """The window centre is 0.60 m from the WEST edge of a 2.5 m wall.
+
+    That is well off-centre, so the square's direction matters: it goes RIGHT
+    first, into the open part of the room. Every point must stay clear without
+    the clamp having to intervene -- a clamp here would mean the pattern is
+    not the one that was asked for.
+    """
+    fsm.arena_entry = (-1.25 + 0.60, -1.25 + 0.80)   # on the window axis, 0.8 m in
+    fsm.arena_entry_yaw = math.pi / 2                 # facing into the room
+    wps = fsm.build_room_waypoints()
+
+    assert len(wps) == 4
+    assert fsm.waypoints_clamped == [], "the real room must not need the clamp"
+    for x, y in wps:
+        nearest = min(x + 1.25, 1.25 - x, y + 1.25, 1.25 - y)
+        assert nearest - 0.13 > 0.40, f"prop tip within 0.40 m of a wall at ({x},{y})"
+    assert wps[-1] == pytest.approx(fsm.arena_entry), "the square closes on the entry"
+
+
+def test_a_square_turning_LEFT_first_would_be_clamped(fsm):
+    """Why the order matters with this window: left first from x=-0.65 plans
+    0.2 m past the west wall. The clamp catches it -- loudly."""
+    fsm.ROOM_SEQUENCE = 'forward 0.8, left 0.8, backward 0.8, right 0.8'
+    fsm.arena_entry = (-1.25 + 0.60, -1.25 + 0.80)
+    fsm.arena_entry_yaw = math.pi / 2
+    fsm.build_room_waypoints()
+    assert fsm.waypoints_clamped, "a move past the wall must be clamped and reported"

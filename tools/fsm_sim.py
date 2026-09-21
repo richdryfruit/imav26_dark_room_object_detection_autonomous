@@ -623,11 +623,14 @@ def main():
     want('TRAVERSE' in stages, "committed to a traverse")
     on = [t for t, en in sim.doll_windows if en]
     off = [t for t, en in sim.doll_windows if not en]
+    lock_t = next((t for t, st in timeline if st in ('LOCK', 'AIM')), None)
     traverse_t = next((t for t, st in timeline if st == 'TRAVERSE'), None)
-    want(bool(on), "doll detection was enabled inside the room")
-    want(bool(on) and traverse_t is not None
-         and abs(on[0] - traverse_t) < 2.0,
-         "...and it was enabled AT the inbound commit, not before or after")
+    want(bool(on), "doll detection was enabled")
+    # Started at the FIRST window detection, before entering, so the TensorRT
+    # engine is loaded by the time the aircraft is inside.
+    want(bool(on) and lock_t is not None and traverse_t is not None
+         and on[0] <= traverse_t and abs(on[0] - lock_t) < 2.0,
+         "...and it was enabled at the FIRST window detection, before entering")
     want(bool(on) and len(off) > 1 and off[-1] > on[0],
          "...and disabled again on the way out")
     want('ALT_CHANGE' in stages, "the altitude schedule ran")

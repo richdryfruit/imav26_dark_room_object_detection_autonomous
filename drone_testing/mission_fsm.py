@@ -326,7 +326,7 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
                                     # set marker_max_retries:=1 to re-enable
                                     # the climb-and-look failsafe.
 
-    OUTBOUND_DISTANCE = 11.0    # m FORWARD, arming point -> window marker
+    OUTBOUND_DISTANCE = 9.3     # m FORWARD, arming point -> window marker
     WINDOW_OFFSET = 0.10        # m LEFT, window marker -> the window's axis.
                                 # MEASURED on the course. 0 disables both
                                 # strafes and approaches obliquely instead.
@@ -338,8 +338,8 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
                                 # under the aircraft on arrival. This is a
                                 # margin, not a transit: an 11 m limit here
                                 # would fly a missed marker back to the net.
-    TURN_DISTANCE = 5.4         # m LEFT, window marker -> turn marker
-    PAD_DISTANCE = 11.0         # m BACKWARD, turn marker -> landing pad.
+    TURN_DISTANCE = 5.0         # m RIGHT (east), window marker -> turn marker
+    PAD_DISTANCE = 9.3          # m BACKWARD, turn marker -> landing pad.
                                 # This lands the aircraft level with the
                                 # takeoff pad and turn_distance to its left.
     LEG_SPEED = 0.30            # m/s. Slow on purpose: the down camera has to
