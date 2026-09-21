@@ -68,19 +68,40 @@ _ORIGIN = ('<spherical_coordinates><surface_model>EARTH_WGS84</surface_model>'
            '</heading_deg></spherical_coordinates>')
 
 
-def _patched_world(path):
-    """Copy the world to /tmp with any missing PX4 sensor systems added.
+def _dim(sdf, scale):
+    """Scale every light's diffuse/specular and the scene ambient by scale."""
+    import re
+    if abs(scale - 1.0) < 1e-6:
+        return sdf
 
-    A world that already has them all (imav2026_scaled) is returned as is.
+    def mul(m):
+        vals = m.group(2).split()
+        rgb = [f"{float(v) * scale:.3f}" for v in vals[:3]]
+        return f"<{m.group(1)}>{' '.join(rgb + vals[3:])}</{m.group(1)}>"
+
+    def in_light(m):
+        return re.sub(r'<(diffuse|specular)>([^<]*)</\1>', mul, m.group(0))
+
+    sdf = re.sub(r'<light\b.*?</light>', in_light, sdf, flags=re.S)
+    return re.sub(r'<scene>.*?</scene>',
+                  lambda m: re.sub(r'<(ambient)>([^<]*)</\1>', mul, m.group(0)),
+                  sdf, flags=re.S)
+
+
+def _patched_world(path, light_scale=1.0):
+    """Copy the world to /tmp with any missing PX4 sensor systems added and
+    the lighting scaled by light_scale.
+
+    A world that already has every system and is not dimmed is returned as is.
     """
     import re
     with open(path) as f:
-        sdf = f.read()
+        sdf = _dim(f.read(), light_scale)
     add = [f'<plugin filename="{fn}" name="{name}"/>'
            for fn, name in _WORLD_SYSTEMS if fn not in sdf]
     if 'spherical_coordinates' not in sdf:
         add.insert(0, _ORIGIN)
-    if not add:
+    if not add and abs(light_scale - 1.0) < 1e-6:
         return path
     # AFTER the world's own systems, as in the worlds where flow works: with
     # the flow system loaded ahead of physics/sensors it never creates its
@@ -91,7 +112,10 @@ def _patched_world(path):
         if head_end < 0 or m.start() < head_end:
             last = m
     at = last.end() if last else re.search(r'<world[^>]*>', sdf).end()
-    sdf = sdf[:at] + '\n' + '\n'.join(add) + '\n' + sdf[at:]
+    if not add:
+        at = None
+    if at is not None:
+        sdf = sdf[:at] + '\n' + '\n'.join(add) + '\n' + sdf[at:]
     out = os.path.join('/tmp', os.path.basename(path).replace('.sdf.world', '_px4.sdf'))
     with open(out, 'w') as f:
         f.write(sdf)
@@ -104,7 +128,8 @@ def _setup(context):
     px4_dir = os.path.expanduser(arg('px4_dir'))
     world_name = arg('world')
     world_file = _patched_world(
-        os.path.join(sitl_src, 'world', world_name + '.sdf.world'))
+        os.path.join(sitl_src, 'world', world_name + '.sdf.world'),
+        float(arg('light_scale')))
     share = get_package_share_directory('drone_testing')
     urdf = xacro.process_file(
         os.path.join(share, 'sim', 'sim_drone.urdf.xacro')).toxml()
@@ -273,7 +298,34 @@ def _setup(context):
                       'stream_port': 8081,
                   }],
                   condition=IfCondition(arg('window_detect')))
-    return env + [gazebo, rsp, spawn, bridge, TimerAction(period=6.0, actions=[window]),
+    # The LDS-01 through lidar_loc, exactly as on the aircraft from the scan on:
+    # gz_lidar_node (in place of the hls_lfcd driver) -> scan_leveler ->
+    # wall_localizer -> pose_kf -> /lidar/odom_kf, which the room scan flies on.
+    # Real-arena config (2.5 m room, 0.135 m mount). use_sim_time as in
+    # lidar_loc's own sitl_lidar.launch.py.
+    arena = os.path.join(get_package_share_directory('lidar_loc'), 'config',
+                         'lidar_arena.yaml')
+    lidar_on = IfCondition(arg('lidar'))
+    lidar = [
+        Node(package='lidar_loc', executable='gz_lidar_node', name='gz_lidar_node',
+             output='screen', condition=lidar_on,
+             parameters=[{'world': world_name, 'model': 'x500_drone',
+                          'frame_id': 'lidar_link', 'ros_scan_topic': '/lidar/scan',
+                          'gz_scan_topic': '/lidar_2d_v2/scan',
+                          'subscribe_scoped_fallback': True, 'publish_clock': True,
+                          'publish_ground_truth': True, 'update_rate': 5.5,
+                          'use_sim_time': False}]),
+        Node(package='lidar_loc', executable='scan_leveler', name='scan_leveler',
+             output='screen', condition=lidar_on,
+             parameters=[arena, {'use_sim_time': True}]),
+        Node(package='lidar_loc', executable='wall_localizer', name='wall_localizer',
+             output='screen', condition=lidar_on,
+             parameters=[arena, {'use_sim_time': True}]),
+        Node(package='lidar_loc', executable='pose_kf.py', name='pose_kf',
+             output='screen', condition=lidar_on,
+             parameters=[{'use_sim_time': True}]),
+    ]
+    return env + lidar + [gazebo, rsp, spawn, bridge, TimerAction(period=6.0, actions=[window]),
                   TimerAction(period=8.0, actions=[px4]),
                   TimerAction(period=20.0, actions=[px4_params]),
                   agent, TimerAction(period=5.0, actions=[aruco])]
@@ -294,6 +346,12 @@ def generate_launch_description():
         DeclareLaunchArgument('y', default_value='-6.5'),
         DeclareLaunchArgument('yaw', default_value='1.5708'),
         DeclareLaunchArgument('marker_id', default_value='2'),
+        DeclareLaunchArgument('lidar', default_value='true',
+                              description='LDS-01 2D lidar + lidar_loc wall localizer '
+                                          '(/lidar/odom_kf) for the room scan.'),
+        DeclareLaunchArgument('light_scale', default_value='0.5',
+                              description='Multiplier on every light in the world '
+                                          '(1 = as authored). The dark room is dim.'),
         DeclareLaunchArgument('window_detect', default_value='true',
                               description='Start window_detect on the sim front camera '
                                           '(part 2). Browser view on :8081.'),

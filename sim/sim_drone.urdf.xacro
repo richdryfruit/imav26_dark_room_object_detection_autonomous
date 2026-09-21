@@ -49,4 +49,31 @@
       </camera>
     </sensor>
   </gazebo>
+
+  <!-- TurtleBot LDS-01 2D lidar: 360 deg, 1 deg steps, 0.12-3.5 m, ~5 Hz,
+       mounted 0.135 m above the body so the scan plane sits at flight height
+       + 0.135 (lidar_arena.yaml's mount_xyz). Read by lidar_loc's
+       gz_lidar_node on its default gz topic. -->
+  <joint name="lidar_2d_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_2d_link"/>
+    <origin xyz="0 0 0.135" rpy="0 0 0"/>
+  </joint>
+  <link name="lidar_2d_link">
+    <inertial><mass value="0.01"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/></inertial>
+  </link>
+  <gazebo reference="lidar_2d_link">
+    <sensor name="lidar_2d" type="gpu_lidar">
+      <topic>lidar_2d_v2/scan</topic>
+      <update_rate>5.5</update_rate>
+      <lidar>
+        <scan><horizontal><samples>360</samples><resolution>1</resolution>
+          <min_angle>-3.14159</min_angle><max_angle>3.14159</max_angle></horizontal></scan>
+        <range><min>0.12</min><max>3.5</max><resolution>0.015</resolution></range>
+        <noise><type>gaussian</type><mean>0</mean><stddev>0.01</stddev></noise>
+      </lidar>
+      <always_on>1</always_on>
+    </sensor>
+  </gazebo>
 </robot>
