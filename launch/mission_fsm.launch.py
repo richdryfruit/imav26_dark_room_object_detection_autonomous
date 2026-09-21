@@ -533,13 +533,13 @@ def generate_launch_description():
                         'camera basket is +/- h*tan(39 deg), so 2.50 m gives '
                         'about +/-2.0 m of capture width for the markers.'),
         DeclareLaunchArgument(
-            'window_altitude_m', default_value='1.75',
+            'window_altitude_m', default_value='1.85',
             description='m dropped to on the FIRST sighting of the window '
                         'marker, and climbed back out of on the second. The '
                         'dark room is NOT on this schedule -- its heights come '
                         'from the measured window pose via window_altitude().'),
         DeclareLaunchArgument(
-            'room_altitude', default_value='1.75',
+            'room_altitude', default_value='1.85',
             description='m the dark-room box pattern is flown at. NOT the '
                         'traverse height -- the traversal is lined up on the '
                         'measured window pose and goes through wherever the '
@@ -644,14 +644,14 @@ def generate_launch_description():
         # holding. Set them a little LONGER than the real spacing, so flow
         # error cannot stop the aircraft short of a marker it would have seen.
         DeclareLaunchArgument(
-            'outbound_distance', default_value='10.0',
+            'outbound_distance', default_value='11.0',
             description='m FORWARD from the arming point, looking for '
                         'window_marker_id. If it never appears the leg ends '
                         'here and the WINDOW SEARCH starts anyway -- the '
                         'window is the real landmark and the marker only '
                         'refines the approach to it.'),
         DeclareLaunchArgument(
-            'window_offset', default_value='0.25',
+            'window_offset', default_value='0.10',
             description='m sideways from the window marker to the window\'s '
                         'CENTRE-LINE. MEASURE IT. The aircraft strafes this '
                         'far onto the axis before the sweep, and mirrors it '
@@ -666,7 +666,7 @@ def generate_launch_description():
                         'window centre-line lies from its marker. The mirror '
                         'strafe on the way out is the opposite of this.'),
         DeclareLaunchArgument(
-            'return_distance', default_value='10.0',
+            'return_distance', default_value='11.0',
             description='m BACKWARD from the window, looking for '
                         'window_marker_id again. Backward because directions '
                         'are in the TAKEOFF frame: the airframe is facing '
@@ -681,7 +681,7 @@ def generate_launch_description():
                         'turn_marker_id. MEASURE THIS ONE -- it is the only '
                         'leg with no natural 11 m to fall back on.'),
         DeclareLaunchArgument(
-            'pad_distance', default_value='10.0',
+            'pad_distance', default_value='11.0',
             description='m BACKWARD (takeoff frame) from the turn marker, '
                         'looking for pad_marker_id. This lands the aircraft '
                         'level with the takeoff pad and turn_distance to its '
@@ -890,7 +890,7 @@ def generate_launch_description():
         DeclareLaunchArgument('request_offboard_from_ros', default_value='true'),
         DeclareLaunchArgument('standoff_distance', default_value='2.0'),
         DeclareLaunchArgument(
-            'inside_distance', default_value='1.20',
+            'inside_distance', default_value='0.80',
             description='m past the window plane the INBOUND run ends: how '
                         'far into the room the aircraft goes before the room '
                         'pattern starts. This is also what decides how much '

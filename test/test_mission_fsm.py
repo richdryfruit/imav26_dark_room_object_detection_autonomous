@@ -704,7 +704,7 @@ def test_the_climb_goes_to_the_cruise_altitude(fsm):
     """takeoff_altitude is deliberately ignored: one height for the markers."""
     assert fsm.TAKEOFF_ALTITUDE == pytest.approx(fsm.CRUISE_ALTITUDE)
     assert fsm.CRUISE_ALTITUDE == pytest.approx(2.50)
-    assert fsm.WINDOW_ALTITUDE == pytest.approx(1.75)
+    assert fsm.WINDOW_ALTITUDE == pytest.approx(1.85)
 
 
 def test_the_outbound_leg_drops_to_the_window_altitude(fsm):
@@ -817,11 +817,11 @@ def test_the_ladder_does_not_fire_before_its_timer(fsm):
     assert fsm.SCAN_SPAN == pytest.approx(0.0), "no sweep until it escalates"
 
 
-def test_the_legs_are_ten_metres_not_eleven(fsm):
+def test_the_legs_are_eleven_metres(fsm):
     d = {leg.name: leg.distance for leg in fsm.legs}
-    assert d['outbound'] == pytest.approx(10.0)
-    assert d['return'] == pytest.approx(10.0)
-    assert d['pad'] == pytest.approx(10.0)
+    assert d['outbound'] == pytest.approx(11.0)
+    assert d['return'] == pytest.approx(11.0)
+    assert d['pad'] == pytest.approx(11.0)
 
 
 # --------------------------------------------- the missed-marker retry
@@ -972,7 +972,7 @@ def test_the_descent_to_the_window_altitude_happens_either_way(fsm):
     fsm._handle_cruise()          # ran out of distance, NO marker seen
 
     assert fsm.current_stage == fsm.ALT_CHANGE
-    assert fsm.alt_target == pytest.approx(fsm.WINDOW_ALTITUDE) == 1.75
+    assert fsm.alt_target == pytest.approx(fsm.WINDOW_ALTITUDE) == 1.85
     # ...and only then the strafe, and only then the window search.
     assert fsm.alt_next == 'offset'
     assert fsm.legs[fsm.leg_by_name['offset']].nxt == 'window'
@@ -1315,3 +1315,38 @@ def test_the_transform_reference_is_latched_after_settling_not_before(fsm):
 
     fsm.latch_transform_reference()
     assert fsm.arena_tf_ref is not None
+
+
+def _lidar_msg(x, y, var):
+    from nav_msgs.msg import Odometry
+    m = Odometry()
+    m.pose.pose.position.x, m.pose.pose.position.y = x, y
+    m.pose.pose.orientation.w = 1.0
+    m.pose.covariance[0] = m.pose.covariance[7] = var
+    return m
+
+
+def test_a_healthy_lidar_fix_is_accepted(fsm):
+    fsm.lidar_odom_callback(_lidar_msg(1.0, 2.0, 0.0025))
+    assert fsm.lidar_fix is not None
+    assert fsm.lidar_fix_is_fresh()
+
+
+def test_a_DEGENERATE_lidar_fix_is_rejected(fsm):
+    """wall_localizer keeps publishing ON TIME when a reference wall leaves
+    view -- at 100 m^2 variance. The LDS-01's 3.50 m range against a 5.41 m
+    room makes that happen at the far tiles. A timestamp-only check would fly
+    on it."""
+    fsm.lidar_odom_callback(_lidar_msg(1.0, 2.0, 100.0))
+    assert fsm.lidar_fix is None, "a degenerate fix must not be stored"
+    assert not fsm.lidar_fix_is_fresh()
+    assert fsm.lidar_rejected == 1
+
+
+def test_a_degenerate_fix_does_not_refresh_a_good_one(fsm):
+    """Otherwise a stream of degenerate fixes would keep a stale good one alive."""
+    fsm.lidar_odom_callback(_lidar_msg(1.0, 2.0, 0.0025))
+    good_time = fsm.lidar_fix_time
+    fsm.lidar_odom_callback(_lidar_msg(9.0, 9.0, 100.0))
+    assert fsm.lidar_fix_time == good_time
+    assert fsm.lidar_fix[0] == pytest.approx(1.0), "position must not change"

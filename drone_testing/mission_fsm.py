@@ -259,7 +259,7 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
     # the traverse height from the measured window pose, which is the only
     # honest source for it, and the room pattern inherits that.
     CRUISE_ALTITUDE = 2.50      # m. Takeoff, every leg, and the landing.
-    WINDOW_ALTITUDE = 1.75      # m. Dropped to on first sighting of the
+    WINDOW_ALTITUDE = 1.85      # m. Dropped to on first sighting of the
                                 # window marker; climbed back out of after
                                 # the room, on sighting it again.
     ROOM_MODE = 'lidar'         # lidar | box. 'lidar' divides the room into
@@ -267,7 +267,7 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
                                 # localizer's drift-free fix. 'box' restores
                                 # the inherited dead-reckoned leg pattern.
     TILE_MOVE_TIMEOUT = 25.0    # s to reach one tile centre before skipping it
-    ROOM_ALTITUDE = 1.75        # m the tile scan is flown at. NOT the
+    ROOM_ALTITUDE = 1.85        # m the tile scan is flown at. NOT the
                                 # traverse height: the traversal is lined up
                                 # on the measured window pose and goes through
                                 # wherever the aperture actually is, but once
@@ -326,16 +326,16 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
                                     # set marker_max_retries:=1 to re-enable
                                     # the climb-and-look failsafe.
 
-    OUTBOUND_DISTANCE = 10.0    # m FORWARD, arming point -> window marker
-    WINDOW_OFFSET = 0.25        # m LEFT, window marker -> the window's axis.
+    OUTBOUND_DISTANCE = 11.0    # m FORWARD, arming point -> window marker
+    WINDOW_OFFSET = 0.10        # m LEFT, window marker -> the window's axis.
                                 # MEASURED on the course. 0 disables both
                                 # strafes and approaches obliquely instead.
     WINDOW_OFFSET_DIRECTION = 'left'
-    RETURN_DISTANCE = 10.0      # m BACKWARD, out of the window -> window
+    RETURN_DISTANCE = 11.0      # m BACKWARD, out of the window -> window
                                 # marker. Only ~3 m is ever flown (standoff
                                 # plus outside_distance); the rest is margin.
     TURN_DISTANCE = 5.4         # m LEFT, window marker -> turn marker
-    PAD_DISTANCE = 10.0         # m BACKWARD, turn marker -> landing pad.
+    PAD_DISTANCE = 11.0         # m BACKWARD, turn marker -> landing pad.
                                 # This lands the aircraft level with the
                                 # takeoff pad and turn_distance to its left.
     LEG_SPEED = 0.30            # m/s. Slow on purpose: the down camera has to

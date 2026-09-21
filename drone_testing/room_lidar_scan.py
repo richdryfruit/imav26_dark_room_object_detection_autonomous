@@ -121,6 +121,12 @@ class LidarRoomScan:
     TRANSFORM_DRIFT_MAX = 0.50          # m
     TRANSFORM_YAW_DRIFT_MAX = math.radians(10.0)
     LIDAR_FIX_TIMEOUT = 2.0             # s, about ten missed scans
+    LIDAR_MAX_VARIANCE = 0.25           # m^2 (0.5 m sigma). A HEALTHY fix is
+                                        # floored at 0.0025 (5 cm); a
+                                        # DEGENERATE one -- a reference wall
+                                        # out of view -- is published at
+                                        # 100.0. Anything above this is
+                                        # rejected as if it never arrived.
     TRANSFORM_LOWPASS = 0.02            # per-tick blend; see update_transform
     TRANSFORM_LATCH_SECONDS = 5.0       # s of settling before the drift
                                         # reference is frozen. The low-pass
@@ -182,6 +188,9 @@ class LidarRoomScan:
             math.degrees(self.TRANSFORM_YAW_DRIFT_MAX))))
         self.LIDAR_FIX_TIMEOUT = float(self._declare_number(
             'fix_timeout', self.LIDAR_FIX_TIMEOUT))
+        self.LIDAR_MAX_VARIANCE = float(self._declare_number(
+            'lidar_max_variance', self.LIDAR_MAX_VARIANCE))
+        self.lidar_rejected = 0
         self.TRANSFORM_LATCH_SECONDS = float(self._declare_number(
             'latch_sec', self.TRANSFORM_LATCH_SECONDS))
         self.LIDAR_ODOM_TOPIC = str(self.declare_parameter(
@@ -209,7 +218,31 @@ class LidarRoomScan:
     # ------------------------------------------------------------------ subs
 
     def lidar_odom_callback(self, msg):
-        """The KF-smoothed arena fix. Relabelled into the configured frame."""
+        """The KF-smoothed arena fix. Relabelled into the configured frame.
+
+        REJECTED, not stored, if its covariance says it is degenerate.
+
+        This matters more than it looks. wall_localizer does not go quiet when
+        it loses a reference wall -- it keeps publishing ON TIME, with a
+        variance of 100 m^2 and a position it cannot vouch for. The LDS-01's
+        range is 3.50 m and the room is 5.41 m, so at a far tile both
+        reference walls are 4.06 m away and that is exactly what happens.
+
+        A freshness check on the timestamp alone accepts that fix, and every
+        tile centre would then be computed through a transform built from it.
+        So a degenerate fix is treated as if it never arrived: the timestamp
+        is not advanced, lidar_fix_is_fresh() goes false within
+        fix_timeout, and the scan is abandoned for the way out rather than
+        flown on a position nobody can vouch for.
+        """
+        cov = msg.pose.covariance
+        try:
+            var = max(float(cov[0]), float(cov[7]))
+        except (IndexError, TypeError, ValueError):
+            var = 0.0
+        if var > self.LIDAR_MAX_VARIANCE:
+            self.lidar_rejected += 1
+            return
         p = msg.pose.pose.position
         q = msg.pose.pose.orientation
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
