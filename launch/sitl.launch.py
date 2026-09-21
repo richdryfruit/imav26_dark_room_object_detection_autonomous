@@ -1,8 +1,13 @@
 """
 PX4 SITL + Gazebo (gz sim 8) for mission_fsm_part1/2, on a laptop.
 
-    ros2 launch drone_testing sitl.launch.py                    # part 1 start
-    ros2 launch drone_testing sitl.launch.py x:=-2.0 y:=3.25    # part 2 start
+    ros2 launch drone_testing sitl.launch.py sitl_src:=<imav_indoor_2026_sitl checkout>
+
+World: imav2026_scaled, the real arena x2.2 (the only world with every sensor
+plugin PX4 needs -- baro, mag, navsat, flow). In it:
+    takeoff pad   id 0   (-4.4, -14.3)     <- default spawn
+    window marker id 2   (-4.4,   7.15)    21.45 m ahead, 0.88 m marker
+    window centre        (-5.83,  9.856, z 3.85), 1.2 x 1.2 m
 
 Starts: gz sim on the imav_indoor_2026 world, the x500 with a down camera,
 PX4 SITL (standalone, attaches to the spawned model), the uXRCE-DDS agent
@@ -56,7 +61,7 @@ def _setup(context):
                parameters=[{'robot_description': urdf}])
     spawn = Node(package='ros_gz_sim', executable='create', output='screen',
                  arguments=['-name', 'x500_drone', '-topic', 'robot_description',
-                            '-x', arg('x'), '-y', arg('y'), '-z', '0.15',
+                            '-x', arg('x'), '-y', arg('y'), '-z', '0.35',
                             '-Y', arg('yaw')])
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge',
                   arguments=[
@@ -78,6 +83,7 @@ def _setup(context):
                            output='screen')
     aruco = Node(package='drone_testing', executable='aruco_pose',
                  name='aruco_pose', output='screen',
+                 additional_env={'PYTHONFAULTHANDLER': '1'},
                  parameters=[{'image_topic': '/down_cam/image',
                               'width': 800, 'height': 600,
                               'hfov_deg': 78.0,
@@ -97,12 +103,12 @@ def generate_launch_description():
                               description='Source checkout of imav_indoor_2026_sitl '
                                           '(the worlds and models are not installed).'),
         DeclareLaunchArgument('px4_dir', default_value='~/PX4-Autopilot'),
-        DeclareLaunchArgument('world', default_value='imav2026_indoor_v9'),
-        DeclareLaunchArgument('x', default_value='-2.0'),
-        DeclareLaunchArgument('y', default_value='-6.5'),
+        DeclareLaunchArgument('world', default_value='imav2026_scaled'),
+        DeclareLaunchArgument('x', default_value='-4.4'),
+        DeclareLaunchArgument('y', default_value='-14.3'),
         DeclareLaunchArgument('yaw', default_value='1.5708'),
         DeclareLaunchArgument('marker_id', default_value='2'),
-        DeclareLaunchArgument('marker_size', default_value='0.40',
+        DeclareLaunchArgument('marker_size', default_value='0.88',
                               description='Edge of the printed marker in the '
                                           'sim world, not the real 0.80.'),
         DeclareLaunchArgument('aruco_dict', default_value='DICT_5X5_50'),
