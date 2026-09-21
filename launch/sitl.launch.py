@@ -74,8 +74,16 @@ def _patched_world(path):
         add.insert(0, _ORIGIN)
     if not add:
         return path
-    m = re.search(r'<world[^>]*>', sdf)
-    sdf = sdf[:m.end()] + '\n' + '\n'.join(add) + '\n' + sdf[m.end():]
+    # AFTER the world's own systems, as in the worlds where flow works: with
+    # the flow system loaded ahead of physics/sensors it never creates its
+    # sensor (PX4 subscribes to the flow topic and nothing ever publishes).
+    head_end = sdf.find('<model')
+    last = None
+    for m in re.finditer(r'<plugin\b[^>]*?(/>|>.*?</plugin>)', sdf, re.S):
+        if head_end < 0 or m.start() < head_end:
+            last = m
+    at = last.end() if last else re.search(r'<world[^>]*>', sdf).end()
+    sdf = sdf[:at] + '\n' + '\n'.join(add) + '\n' + sdf[at:]
     out = os.path.join('/tmp', os.path.basename(path).replace('.sdf.world', '_px4.sdf'))
     with open(out, 'w') as f:
         f.write(sdf)
