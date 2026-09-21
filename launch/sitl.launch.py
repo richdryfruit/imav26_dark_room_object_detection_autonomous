@@ -183,11 +183,13 @@ def _setup(context):
         'EKF2_GPS_CTRL': 0, 'EKF2_OF_CTRL': 1, 'EKF2_RNG_CTRL': 1,
         'EKF2_HGT_REF': 1, 'EKF2_MIN_RNG': 0.1, 'COM_ARM_WO_GPS': 1,
         'NAV_RCL_ACT': 0, 'NAV_DLL_ACT': 0, 'COM_RCL_EXCEPT': 4,
-        # No barometer, as on the aircraft (lidar = height). The sim baro is
-        # flagged faulty on the pad ("height estimate not stable", arming
-        # denied); with it off EKF2 falls back to the rangefinder for height
-        # and still estimates terrain from it, which is what flow needs.
-        'EKF2_BARO_CTRL': 0,
+        # Barometer ON as a backup height source, as on the aircraft. With it
+        # off, the rangefinder was the ONLY height source and looking down at
+        # the window sill mid-traverse (< EKF2_MIN_RNG) invalidated altitude
+        # inside the room. (It was switched off after a baro fault in the
+        # scaled world; the earlier multi-EKF and stray-PX4 problems may have
+        # been behind that.)
+        'EKF2_BARO_CTRL': 1,
         # No RC in SITL: without this PX4 raises manual_control_signal_lost
         # and drops out of Offboard into Hold.
         'COM_RC_IN_MODE': 4,
@@ -229,7 +231,7 @@ def _setup(context):
     px4_params = ExecuteProcess(
         cmd=['bash', '-c',
              f'cd {px4_dir}/build/px4_sitl_default && {set_params}; '
-             'echo "SITL PARAMS SET: flow x/y, rangefinder height, no baro, no GPS, no EV, no RC"; '
+             'echo "SITL PARAMS SET: flow x/y, rangefinder + baro height, no GPS, no EV, no RC"; '
              f'echo "SITL ISOLATED: ROS_DOMAIN_ID={domain}, localhost only -- export the same in the mission terminal"; '
              # One-shot health report after EKF2 has had time to settle, so a
              # refused arm or a flapping position is explained in this log.
