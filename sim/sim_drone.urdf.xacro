@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<!-- SITL only: the imav_indoor_2026 x500 plus the down-facing ArUco camera
+     the real airframe has (78 deg HFOV, 800x600, image-up = nose). -->
+<robot name="x500_drone" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:include filename="$(find imav_indoor_2026)/description/x500_drone.urdf.xacro"/>
+
+  <joint name="down_cam_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="down_cam_link"/>
+    <origin xyz="0.05 0 -0.06" rpy="0 0 0"/>
+  </joint>
+  <link name="down_cam_link">
+    <inertial><mass value="0.01"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/></inertial>
+  </link>
+  <gazebo reference="down_cam_link">
+    <sensor name="down_cam" type="camera">
+      <pose>0 0 0 0 1.5707963 0</pose>
+      <topic>down_cam/image</topic>
+      <update_rate>20</update_rate>
+      <camera>
+        <horizontal_fov>1.3614</horizontal_fov>
+        <image><width>800</width><height>600</height><format>R8G8B8</format></image>
+        <clip><near>0.05</near><far>20</far></clip>
+      </camera>
+    </sensor>
+  </gazebo>
+</robot>

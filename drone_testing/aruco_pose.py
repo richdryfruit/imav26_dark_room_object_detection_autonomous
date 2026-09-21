@@ -348,35 +348,49 @@ class ArucoPose(Node):
         self.marker_points_pub = self.create_publisher(
             PointStamped, '/aruco/marker_points', 10)
 
-        source = self.camera_device or self.camera_index
-        if self.camera_device and not os.path.exists(self.camera_device):
+        # SITL: take frames from a ROS image topic instead of a USB camera.
+        # Empty (the default) keeps the real camera path below untouched.
+        self.image_topic = str(self.declare_parameter('image_topic', '').value).strip()
+        if self.image_topic:
+            self.camera_device = ''
+        source = self.image_topic or self.camera_device or self.camera_index
+        if self.image_topic:
+            self.cap = None
+        elif self.camera_device and not os.path.exists(self.camera_device):
             raise SystemExit(
                 f"camera_device {self.camera_device} does not exist. Is the down "
                 "camera plugged in? `ls /dev/v4l/by-id/` lists what is.")
-        self.cap = (cv2.VideoCapture(self.camera_device, cv2.CAP_V4L2)
-                    if self.camera_device else cv2.VideoCapture(self.camera_index))
-        if not self.cap.isOpened():
+        if not self.image_topic:
+            self.cap = (cv2.VideoCapture(self.camera_device, cv2.CAP_V4L2)
+                        if self.camera_device else cv2.VideoCapture(self.camera_index))
+        if self.cap is not None and not self.cap.isOpened():
             raise SystemExit(f"Could not open camera {source}.")
         self.get_logger().info(f"Down camera: {source}")
-        if len(self.fourcc) == 4:
+        if self.cap is not None and len(self.fourcc) == 4:
             self.cap.set(cv2.CAP_PROP_FOURCC,
                          cv2.VideoWriter_fourcc(*self.fourcc))
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        if self.camera_fps > 0.0:
-            self.cap.set(cv2.CAP_PROP_FPS, self.camera_fps)
-        # One-deep buffer: we always want the NEWEST frame. A queued frame is
-        # latency, and latency in a landing loop is phase lag.
-        try:
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except Exception:
-            pass
+        if self.cap is not None:
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            if self.camera_fps > 0.0:
+                self.cap.set(cv2.CAP_PROP_FPS, self.camera_fps)
+            # One-deep buffer: we always want the NEWEST frame. A queued frame
+            # is latency, and latency in a landing loop is phase lag.
+            try:
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
 
-        # The grab runs on its own thread and always keeps only the latest
-        # frame. cap.read() blocks for a frame interval, and doing that inside
-        # a ROS timer would stall this node's executor for 33 ms at a time.
-        self._grab_thread = threading.Thread(target=self._grab_loop, daemon=True)
-        self._grab_thread.start()
+            # The grab runs on its own thread and always keeps only the latest
+            # frame. cap.read() blocks for a frame interval, and doing that
+            # inside a ROS timer would stall this node's executor for 33 ms.
+            self._grab_thread = threading.Thread(target=self._grab_loop,
+                                                 daemon=True)
+            self._grab_thread.start()
+        else:
+            from sensor_msgs.msg import Image
+            self.create_subscription(Image, self.image_topic,
+                                     self._image_callback, 1)
 
         self.stream = None
         if self.stream_port:
@@ -390,8 +404,10 @@ class ArucoPose(Node):
 
         self.timer = self.create_timer(1.0 / max(detect_rate, 1.0), self.detect_once)
 
-        actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        actual_w = (int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    if self.cap is not None else self.width)
+        actual_h = (int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    if self.cap is not None else self.height)
         self.get_logger().warning(
             f"ArUco down-camera pose: id {self.marker_id}, "
             f"{self.marker_size * 100:.0f} cm marker, {dict_name}, "
@@ -414,6 +430,19 @@ class ArucoPose(Node):
             with self._frame_lock:
                 self._frame = frame
                 self._frame_seq += 1
+
+    def _image_callback(self, msg):
+        """SITL frames: sensor_msgs/Image -> BGR, stored like _grab_loop does."""
+        ch = 1 if msg.encoding in ('mono8', '8UC1') else 3
+        frame = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+            msg.height, msg.step // ch, ch)[:, :msg.width]
+        if ch == 1:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        elif msg.encoding == 'rgb8':
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        with self._frame_lock:
+            self._frame = np.ascontiguousarray(frame)
+            self._frame_seq += 1
 
     def latest_jpeg(self):
         return self._jpeg
