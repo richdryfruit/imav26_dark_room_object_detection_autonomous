@@ -134,11 +134,16 @@ def _setup(context):
     set_params = '; '.join(f'bin/px4-param set {k} {v}' for k, v in params.items())
     px4 = ExecuteProcess(
         cmd=['bash', '-c',
+             # Kill any PX4 left over from an earlier run first: a second
+             # instance publishes the same /fmu/out topics, and the node then
+             # sees two vehicles interleaved (flapping failsafes, jumps).
+             # exec, so Ctrl-C on the launch reaches PX4 itself.
+             f'pkill -x px4; sleep 1; '
              f'cd {px4_dir} && rm -f build/px4_sitl_default/rootfs/*.bson && '
              f'{env_params} PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 '
              f'PX4_GZ_MODEL_NAME=x500_drone PX4_GZ_WORLD={world_name} '
-             'build/px4_sitl_default/bin/px4 -d'],
-        output='screen')
+             'exec build/px4_sitl_default/bin/px4 -d'],
+        output='screen', sigterm_timeout='5', sigkill_timeout='5')
     px4_params = ExecuteProcess(
         cmd=['bash', '-c',
              f'cd {px4_dir}/build/px4_sitl_default && {set_params}; '
