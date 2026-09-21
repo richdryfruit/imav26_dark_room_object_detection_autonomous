@@ -213,6 +213,21 @@ class DollDetect(Node):
             info_topic = self.image_topic.rsplit('/', 1)[0] + '/camera_info'
         self.camera_info_topic = info_topic
 
+        # WHERE A DETECTION'S DEPTH COMES FROM.
+        #   image       the aligned depth image (the level RealSense), as before.
+        #   rangefinder the DOWNWARD camera over a flat floor: every pixel's
+        #               depth along the optical axis is the height above the
+        #               floor, which the TFmini measures (dist_bottom), minus
+        #               target_height (the doll's centre above the floor).
+        #               Mount it with cam_pitch -90 deg (image-up = nose).
+        self.depth_source = str(self.declare_parameter(
+            'depth_source', 'image').value).strip().lower()
+        if self.depth_source not in ('image', 'rangefinder'):
+            raise SystemExit(f"depth_source must be image|rangefinder, got "
+                             f"'{self.depth_source}'")
+        self.target_height = float(self.declare_parameter(
+            'target_height', 0.10).value)
+
         self.publish_image = bool(self.declare_parameter('publish_image', False).value)
         self.require_enable = bool(self.declare_parameter('require_enable', True).value)
 
@@ -259,9 +274,10 @@ class DollDetect(Node):
         self.create_subscription(Bool, 'doll_detect_enable',
                                  self.enable_callback, 10,
                                  callback_group=self.sensor_cbg)
-        self.create_subscription(Image, self.depth_topic, self.depth_callback,
-                                 qos_profile_sensor_data,
-                                 callback_group=self.sensor_cbg)
+        if self.depth_source == 'image':
+            self.create_subscription(Image, self.depth_topic, self.depth_callback,
+                                     qos_profile_sensor_data,
+                                     callback_group=self.sensor_cbg)
         self.create_subscription(CameraInfo, self.camera_info_topic,
                                  self.camera_info_callback,
                                  qos_profile_sensor_data,
@@ -440,7 +456,11 @@ class DollDetect(Node):
                 "not counting them. They will be counted on a later frame if "
                 "they are still there.", throttle_duration_sec=5.0)
 
-        depth_ok = depth is not None and depth_age < 1.0
+        if self.depth_source == 'rangefinder':
+            depth_ok = (lp is not None and bool(lp.dist_bottom_valid)
+                        and lp.dist_bottom - self.target_height > self.depth_min)
+        else:
+            depth_ok = depth is not None and depth_age < 1.0
 
         for track_id, box, conf in detections:
             # Case 1: this track is already on a doll. Nothing to decide.
@@ -504,9 +524,15 @@ class DollDetect(Node):
                 "be placed.", throttle_duration_sec=10.0)
             return None
 
-        distance = self._box_depth(box, depth)
-        if distance is None:
-            return None
+        if self.depth_source == 'rangefinder':
+            # Flat floor under a level, downward camera: z-depth = HAGL.
+            distance = float(lp.dist_bottom) - self.target_height
+            if not (self.depth_min <= distance <= self.depth_max):
+                return None
+        else:
+            distance = self._box_depth(box, depth)
+            if distance is None:
+                return None
 
         fx, fy, cx, cy = self.intrinsics
         x1, y1, x2, y2 = [float(v) for v in box]

@@ -159,14 +159,19 @@ def _south_wall(b, r):
     return '\n'.join(out)
 
 
-def _doll_models(models_dir, out_dir):
-    """Split MODERN_DOLL_FAMILY into single-doll models under out_dir."""
+def _doll_models(models_dir, out_dir, scale=5):
+    """Split MODERN_DOLL_FAMILY into single-doll models under out_dir.
+
+    scale is the mesh scale: 5 for the real-scale world, 10 for
+    imav2026_scaled (what its MODERN_DOLL_FAMILY_SCALED uses).
+    """
+    tag = f'IMAV_DOLL_S{scale}_'
     src = os.path.join(models_dir, 'MODERN_DOLL_FAMILY')
     obj = os.path.join(src, 'meshes', 'model.obj')
     tex = os.path.join(src, 'materials', 'textures', 'texture.png')
     if not os.path.exists(obj):
         return []
-    done = os.path.join(out_dir, 'IMAV_DOLL_3', 'model.sdf')
+    done = os.path.join(out_dir, f'{tag}3', 'model.sdf')
     if not os.path.exists(done):
         lines = open(obj).read().splitlines()
         v = [ln for ln in lines if ln.startswith('v ')]
@@ -194,7 +199,7 @@ def _doll_models(models_dir, out_dir):
             new = {old: k + 1 for k, old in enumerate(keep)}
             cx = sum(xyz[i][0] for i in keep) / len(keep)
             cy = sum(xyz[i][1] for i in keep) / len(keep)
-            d = os.path.join(out_dir, f'IMAV_DOLL_{n}')
+            d = os.path.join(out_dir, f'{tag}{n}')
             os.makedirs(os.path.join(d, 'meshes'), exist_ok=True)
             with open(os.path.join(d, 'meshes', 'doll.mtl'), 'w') as f:
                 f.write(f'newmtl material_0\nKd 1 1 1\nmap_Kd {tex}\n')
@@ -213,18 +218,40 @@ def _doll_models(models_dir, out_dir):
                         p[0] = str(new[int(p[0]) - 1])
                         toks.append('/'.join(p))
                     f.write('f ' + ' '.join(toks) + '\n')
-            mesh = ('<mesh><scale>5 5 5</scale><uri>meshes/doll.obj</uri></mesh>')
+            mesh = (f'<mesh><scale>{scale} {scale} {scale}</scale>'
+                    '<uri>meshes/doll.obj</uri></mesh>')
             with open(os.path.join(d, 'model.sdf'), 'w') as f:
                 f.write(f'<?xml version="1.0"?><sdf version="1.6"><model name='
-                        f'"IMAV_DOLL_{n}"><static>true</static><link name="link">'
+                        f'"{tag}{n}"><static>true</static><link name="link">'
                         f'<visual name="visual"><geometry>{mesh}</geometry></visual>'
                         f'<collision name="collision"><geometry>{mesh}</geometry>'
                         f'</collision></link></model></sdf>')
             with open(os.path.join(d, 'model.config'), 'w') as f:
-                f.write(f'<?xml version="1.0"?><model><name>IMAV_DOLL_{n}</name>'
+                f.write(f'<?xml version="1.0"?><model><name>{tag}{n}</name>'
                         '<version>1.0</version><sdf version="1.6">model.sdf</sdf>'
                         '</model>')
-    return [f'IMAV_DOLL_{n}' for n in (1, 2, 3)]
+    return [f'{tag}{n}' for n in (1, 2, 3)]
+
+
+# Three single dolls in imav2026_scaled (room x -7.7..-2.2, y 9.9..15.4),
+# ~3 m apart and all inside the DOWN camera's view from the hold point
+# (window axis x -5.83, 1.76 m in -> y 11.66; at 3.85 m it sees about
+# +/-2.6 m across and +/-1.9 m fore-aft).
+_DOLLS_SCALED = [((-7.30, 13.20, 1.0), 0), ((-3.60, 13.30, -2.0), 1),
+                 ((-4.20, 10.60, 2.6), 2)]
+
+
+def _replace_dolls(sdf, models_dir, out_dir, placements, scale):
+    """Comment out the MODERN_DOLL_FAMILY groups, add three single dolls."""
+    import re
+    sdf = re.sub(r'(<include>\s*<name>baby_doll_\d+</name>.*?</include>)',
+                 lambda m: '<!-- ' + m.group(1).replace('--', '- -') + ' -->',
+                 sdf, flags=re.S)
+    dolls = _doll_models(models_dir, out_dir, scale)
+    extra = [f'<include><name>doll_{k + 1}</name><pose>{x} {y} 0.05 0 0 '
+             f'{yaw}</pose><uri>model://{dolls[k]}</uri></include>'
+             for ((x, y, yaw), k) in placements[:len(dolls)]]
+    return sdf.replace('</world>', '\n'.join(extra) + '\n</world>')
 
 
 def _real_course(sdf, models_dir, out_dir, scale=1.0):
@@ -262,8 +289,12 @@ def _patched_world(path, light_scale=1.0, window_scale=1.0):
     if 'spherical_coordinates' not in sdf:
         add.insert(0, _ORIGIN)
     course = os.path.basename(path).startswith('imav2026_indoor_v9')
-    if not add and abs(light_scale - 1.0) < 1e-6 and not course:
+    scaled = os.path.basename(path).startswith('imav2026_scaled')
+    if not add and abs(light_scale - 1.0) < 1e-6 and not course and not scaled:
         return path
+    if scaled:
+        sdf = _replace_dolls(sdf, os.path.join(os.path.dirname(path), 'models'),
+                             _SIM_MODELS, _DOLLS_SCALED, 10)
     if course:
         sdf = _real_course(sdf, os.path.join(os.path.dirname(path), 'models'),
                            _SIM_MODELS, window_scale)
@@ -335,7 +366,8 @@ def _setup(context):
     domain = arg('ros_domain')
     env = [
         SetEnvironmentVariable('ROS_DOMAIN_ID', domain),
-        SetEnvironmentVariable('ROS_AUTOMATIC_DISCOVERY_RANGE', 'LOCALHOST'),
+        SetEnvironmentVariable('ROS_AUTOMATIC_DISCOVERY_RANGE',
+                               arg('discovery_range')),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', ':'.join([
             os.path.dirname(get_package_share_directory('imav_indoor_2026')),
             os.path.join(sitl_src, 'world'),
@@ -359,6 +391,8 @@ def _setup(context):
     bridge = Node(package='ros_gz_bridge', executable='parameter_bridge',
                   arguments=[
                       '/down_cam/image@sensor_msgs/msg/Image[gz.msgs.Image',
+                      '/down_cam/camera_info@sensor_msgs/msg/CameraInfo'
+                      '[gz.msgs.CameraInfo',
                       '/camera/rgb/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
                       '/camera/rgb/camera_info@sensor_msgs/msg/CameraInfo'
                       '[gz.msgs.CameraInfo',
@@ -532,6 +566,11 @@ def _setup(context):
 
 def generate_launch_description():
     return LaunchDescription([
+        DeclareLaunchArgument('discovery_range', default_value='LOCALHOST',
+                              description='LOCALHOST (isolated) | SUBNET: lets another '
+                                          'machine join domain ros_domain, e.g. the '
+                                          'Jetson running doll_detect on its TensorRT '
+                                          'engine. Still never domain 0.'),
         DeclareLaunchArgument('ros_domain', default_value='42',
                               description='ROS domain for everything in the sim. '
                                           'Never 0 on a shared network.'),
