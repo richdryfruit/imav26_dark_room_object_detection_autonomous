@@ -1,6 +1,6 @@
 """
 MISSION PART 2: from the window marker, strafe 0.15 m left, window in, dark
-room at 1.90 m (dolls geotagged and counted), window out, strafe back and land
+room at 1.75 m (dolls geotagged and counted), window out, strafe back and land
 on the marker. See drone_testing/mission_fsm_part2.py.
 
     ros2 launch drone_testing mission_fsm_part2.launch.py
@@ -29,9 +29,9 @@ from launch_ros.substitutions import FindPackageShare
 PART2_DEFAULTS = {
     'fsm_executable': 'mission_fsm_part2',
     'window_marker_id': '0',
-    'cruise_altitude': '1.90',
-    'window_altitude_m': '1.90',
-    'room_altitude': '1.90',
+    'cruise_altitude': '1.75',
+    'window_altitude_m': '1.75',
+    'room_altitude': '1.75',
     'window_offset': '0.15',
     'window_offset_direction': 'left',
     'standoff_distance': '1.67',

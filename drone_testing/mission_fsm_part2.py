@@ -2,11 +2,11 @@
 MISSION, PART 2 OF 2: WINDOW MARKER -> DARK ROOM -> BACK ONTO THE MARKER.
 
     (placed on the window marker, FACING THE WINDOW)
-    arm -> climb to 1.90 m -> hold
+    arm -> climb to 1.75 m -> hold
       -> strafe LEFT 0.15 m onto the window's axis
       -> find the window, line up, traverse in to 0.80 m past the window plane.
          The doll detector is switched on at the first window lock.
-      -> dark room at 1.90 m, flown on the lidar wall fix:
+      -> dark room at 1.75 m, flown on the lidar wall fix:
              forward 0.8, right 0.8, backward 0.8, left 0.8, yaw 180
          dolls geotagged and counted (/doll_count, printed in the terminal)
       -> relock on the window from inside, traverse out to 1.67 m past the
@@ -31,8 +31,8 @@ same calls it always makes. What this file changes:
 
   * the plan: 'offset' -> window -> room -> out -> 'offset_back' -> 'final'.
     No outbound leg, no return/turn/pad legs.
-  * one altitude, 1.90 m, for the climb, the strafes, the window and the
-    room -- the window centre is 1.90 m (0.60 m below the 2.5 m wall top).
+  * one altitude, 1.75 m, for the climb, the strafes, the window and the
+    room. Lowered from the window centre (1.90 m) on instruction.
   * 'final' is a zero-length marker leg with its own handler: hover at P,
     look, centre if seen, and come back to P if centring fails. It reuses
     MARKER_ALIGN / MARKER_HOLD unchanged, so the centring loop and its
@@ -70,9 +70,9 @@ class MissionFSMPart2(MissionFSM):
     """Window marker -> window -> dark room -> window -> back onto the marker."""
 
     # ---- one height for the whole flight --------------------------------
-    CRUISE_ALTITUDE = 1.90      # m. Climb, strafes and the window approach.
-    WINDOW_ALTITUDE = 1.90
-    ROOM_ALTITUDE = 1.90
+    CRUISE_ALTITUDE = 1.75      # m. Climb, strafes and the window approach.
+    WINDOW_ALTITUDE = 1.75
+    ROOM_ALTITUDE = 1.75
 
     # ---- the course, measured -------------------------------------------
     WINDOW_OFFSET = 0.15        # m LEFT, window marker -> window axis

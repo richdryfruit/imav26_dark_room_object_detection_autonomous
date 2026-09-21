@@ -7,7 +7,7 @@ dark-room scan and doll counting are the same code the full mission flies.
 | | **Part 1** — `mission_fsm_part1` | **Part 2** — `mission_fsm_part2` |
 |---|---|---|
 | Start | takeoff pad, facing the course | **on the window marker, facing the window** |
-| Altitude | 2.10 m | 1.90 m |
+| Altitude | 2.10 m | 1.75 m |
 | Flight | forward up to 9.3 m, watching for the window marker (id 0) | strafe 0.15 m left → window in (0.80 m) → room `forward 0.8, right 0.8, backward 0.8, left 0.8, yaw 180` (dolls geotagged + counted) → window out (1.67 m) → strafe back |
 | Landing | marker seen: centre (15 cm) → hold → **slow descent (0.10 m/s) holding the point**. No marker: same slow descent at 9.3 m | hover at the strafe end P, look 10 s: marker seen → centre → normal descent. Centring fails → back to P, look again (2 tries) → slow descent at P |
 
