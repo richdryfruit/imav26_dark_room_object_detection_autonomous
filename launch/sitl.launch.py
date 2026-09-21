@@ -3,15 +3,16 @@ PX4 SITL + Gazebo (gz sim 8) for mission_fsm_part1/2, on a laptop.
 
     ros2 launch drone_testing sitl.launch.py sitl_src:=<imav_indoor_2026_sitl checkout>
 
-World: imav2026_indoor_v9, REAL scale. It ships without the sensor systems
-PX4 needs (baro, mag, navsat, optical flow) and without a geographic origin,
-so the launch writes a patched copy to /tmp and loads that. In it:
-    takeoff pad   id 0   (-2.0, -6.5)      <- default spawn (part 1)
-    window marker id 2   (-2.0,  3.25)     9.75 m ahead, 0.40 m marker
-                                           <- part 2 spawn: y:=3.25
-    blue window          centre (-2.65, 4.48, z 1.75), 0.5 x 0.5 m aperture:
-                         0.65 m LEFT of the marker, 1.23 m beyond it
-    dark room            2.5 x 2.5 x 2.5 m, south wall y 4.5
+World: imav2026_indoor_v9, REAL scale, patched into /tmp to the MEASURED
+course (it ships without PX4's sensor systems and with a different window):
+    takeoff pad   id 0   (-2.75, -6.47)    <- default spawn (part 1)
+    window marker id 2   (-2.75,  2.83)    9.30 m ahead, 0.40 m marker
+                                           <- part 2 spawn: y:=2.83
+    blue opening         0.60 x 0.60 m, centre (-2.90, 4.50, z 1.90):
+                         0.15 m LEFT of the marker, 1.67 m beyond it
+    red opening          0.50 x 0.50 m, centre (-1.50, 4.50, z 2.00)
+    dark room            2.5 x 2.5 x 2.5 m, south wall y 4.50
+    dolls                3 single dolls cut from MODERN_DOLL_FAMILY
 
 world:=imav2026_scaled still works (x2.2, window at 3.85 m -- too high for
 part 2's 1.9 m flight; pass x:=-4.4 y:=-14.3 marker_size:=0.88).
@@ -55,6 +56,7 @@ from launch_ros.actions import Node
 
 
 # Systems PX4's gz_bridge needs sensor data from, and the origin navsat needs.
+_SIM_MODELS = '/tmp/imav_sim_models'       # generated models (dolls)
 _WORLD_SYSTEMS = [
     ('gz-sim-air-pressure-system', 'gz::sim::systems::AirPressure'),
     ('gz-sim-magnetometer-system', 'gz::sim::systems::Magnetometer'),
@@ -88,6 +90,149 @@ def _dim(sdf, scale):
                   sdf, flags=re.S)
 
 
+# ---- the real course, measured (imav2026_indoor_v9 only) -----------------
+# Dark room: 2.5 m cube, south (window) wall at y 4.50, x -3.50 (left, seen
+# from outside) .. -1.00 (right), 0.04 m thick. Openings are the MEASURED
+# openings; the colour is a 2 cm band on the outside face around each one.
+_WALL_Y, _WALL_L, _WALL_R, _WALL_H, _WALL_T = 4.50, -3.50, -1.00, 2.50, 0.04
+_BLUE = (_WALL_L + 0.30, _WALL_L + 0.90, 1.60, 2.20)   # x0, x1, z0, z1
+_RED = (_WALL_L + 1.75, _WALL_L + 2.25, 1.75, 2.25)
+_BAND = 0.02
+_MARKER_XY = (_WALL_L + 0.60 + 0.15, _WALL_Y - 1.67)    # 0.15 m right of blue axis
+_PAD_XY = (_MARKER_XY[0], _MARKER_XY[1] - 9.30)        # part 1's 9.3 m leg
+# Three single dolls cut from MODERN_DOLL_FAMILY (4 dolls, 4 mesh pieces),
+# spread across the room floor, clear of the walls.
+_DOLLS = [((-3.10, 6.60, 1.0), 0), ((-1.40, 6.50, -2.0), 1), ((-1.45, 5.05, 2.6), 2)]
+
+
+def _box(name, x0, x1, z0, z1, y, t, rgb):
+    cx, cz, sx, sz = (x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0
+    col = f'{rgb} 1'
+    return (f'<model name="{name}"><static>true</static><pose>{cx:.4f} {y:.4f} '
+            f'{cz:.4f} 0 0 0</pose><link name="link"><collision name="col">'
+            f'<geometry><box><size>{sx:.4f} {t:.4f} {sz:.4f}</size></box>'
+            f'</geometry></collision><visual name="v"><geometry><box><size>'
+            f'{sx:.4f} {t:.4f} {sz:.4f}</size></box></geometry><material>'
+            f'<ambient>{col}</ambient><diffuse>{col}</diffuse></material>'
+            '</visual></link></model>')
+
+
+def _south_wall():
+    """The wall as boxes around the two openings, plus the colour bands."""
+    L, R, T, H, y = _WALL_L, _WALL_R, _WALL_T, _WALL_H, _WALL_Y
+    wall = '0.60 0.50 0.38'
+    b, r = _BLUE, _RED
+    zlo, zhi = min(b[2], r[2]), max(b[3], r[3])
+    parts = [
+        ('room_S_bot', L, R, 0.0, zlo), ('room_S_top', L, R, zhi, H),
+        ('room_S_a', L, b[0], zlo, zhi), ('room_S_b', b[1], r[0], zlo, zhi),
+        ('room_S_c', r[1], R, zlo, zhi),
+    ]
+    for tag, (x0, x1, z0, z1) in (('blue', b), ('red', r)):
+        if z0 > zlo:
+            parts.append((f'room_S_under_{tag}', x0, x1, zlo, z0))
+        if z1 < zhi:
+            parts.append((f'room_S_over_{tag}', x0, x1, z1, zhi))
+    out = [_box(n, x0, x1, z0, z1, y, T, wall) for n, x0, x1, z0, z1 in parts]
+    yb = y - T / 2 - 0.004                      # just proud of the outside face
+    for tag, (x0, x1, z0, z1), rgb in (('blue', b, '0.0 0.3 1.0'),
+                                       ('red', r, '1.0 0.0 0.0')):
+        e = _BAND
+        for side, box in (('top', (x0 - e, x1 + e, z1, z1 + e)),
+                          ('bot', (x0 - e, x1 + e, z0 - e, z0)),
+                          ('L', (x0 - e, x0, z0, z1)), ('R', (x1, x1 + e, z0, z1))):
+            out.append(_box(f'room_{tag}_{side}', *box, yb, 0.006, rgb))
+    return '\n'.join(out)
+
+
+def _doll_models(models_dir, out_dir):
+    """Split MODERN_DOLL_FAMILY into single-doll models under out_dir."""
+    src = os.path.join(models_dir, 'MODERN_DOLL_FAMILY')
+    obj = os.path.join(src, 'meshes', 'model.obj')
+    tex = os.path.join(src, 'materials', 'textures', 'texture.png')
+    if not os.path.exists(obj):
+        return []
+    done = os.path.join(out_dir, 'IMAV_DOLL_3', 'model.sdf')
+    if not os.path.exists(done):
+        lines = open(obj).read().splitlines()
+        v = [ln for ln in lines if ln.startswith('v ')]
+        rest = [ln for ln in lines if ln.startswith(('vt ', 'vn '))]
+        faces = [ln for ln in lines if ln.startswith('f ')]
+        par = list(range(len(v)))
+
+        def find(a):
+            while par[a] != a:
+                par[a] = par[par[a]]
+                a = par[a]
+            return a
+        fidx = [[int(t.split('/')[0]) - 1 for t in f.split()[1:]] for f in faces]
+        for f in fidx:
+            r0 = find(f[0])
+            for k in f[1:]:
+                rk = find(k)
+                if rk != r0:
+                    par[rk] = r0
+        roots = [find(i) for i in range(len(v))]
+        comps = sorted(set(roots), key=lambda c: -roots.count(c))
+        xyz = [list(map(float, ln.split()[1:4])) for ln in v]
+        for n, comp in enumerate(comps[:3], start=1):
+            keep = [i for i in range(len(v)) if roots[i] == comp]
+            new = {old: k + 1 for k, old in enumerate(keep)}
+            cx = sum(xyz[i][0] for i in keep) / len(keep)
+            cy = sum(xyz[i][1] for i in keep) / len(keep)
+            d = os.path.join(out_dir, f'IMAV_DOLL_{n}')
+            os.makedirs(os.path.join(d, 'meshes'), exist_ok=True)
+            with open(os.path.join(d, 'meshes', 'doll.mtl'), 'w') as f:
+                f.write(f'newmtl material_0\nKd 1 1 1\nmap_Kd {tex}\n')
+            with open(os.path.join(d, 'meshes', 'doll.obj'), 'w') as f:
+                f.write('mtllib doll.mtl\nusemtl material_0\n')
+                for i in keep:
+                    x, y, z = xyz[i]
+                    f.write(f'v {x - cx:.6f} {y - cy:.6f} {z:.6f}\n')
+                f.write('\n'.join(rest) + '\n')
+                for fl, fi in zip(faces, fidx):
+                    if roots[fi[0]] != comp:
+                        continue
+                    toks = []
+                    for t in fl.split()[1:]:
+                        p = t.split('/')
+                        p[0] = str(new[int(p[0]) - 1])
+                        toks.append('/'.join(p))
+                    f.write('f ' + ' '.join(toks) + '\n')
+            mesh = ('<mesh><scale>5 5 5</scale><uri>meshes/doll.obj</uri></mesh>')
+            with open(os.path.join(d, 'model.sdf'), 'w') as f:
+                f.write(f'<?xml version="1.0"?><sdf version="1.6"><model name='
+                        f'"IMAV_DOLL_{n}"><static>true</static><link name="link">'
+                        f'<visual name="visual"><geometry>{mesh}</geometry></visual>'
+                        f'<collision name="collision"><geometry>{mesh}</geometry>'
+                        f'</collision></link></model></sdf>')
+            with open(os.path.join(d, 'model.config'), 'w') as f:
+                f.write(f'<?xml version="1.0"?><model><name>IMAV_DOLL_{n}</name>'
+                        '<version>1.0</version><sdf version="1.6">model.sdf</sdf>'
+                        '</model>')
+    return [f'IMAV_DOLL_{n}' for n in (1, 2, 3)]
+
+
+def _real_course(sdf, models_dir, out_dir):
+    """v9 -> the measured course: south wall, marker, pad, three dolls."""
+    import re
+    # Old south wall, window frames and the original doll families: out.
+    sdf = re.sub(r'<model name="room_(S_|blue_|red_)[^"]*">.*?</model>', '',
+                 sdf, flags=re.S)
+    sdf = re.sub(r'(<include>\s*<name>baby_doll_\d+</name>.*?</include>)',
+                 lambda m: '<!-- ' + m.group(1).replace('--', '- -') + ' -->',
+                 sdf, flags=re.S)
+    for name, (x, y) in (('platform_1', _MARKER_XY), ('takeoff_platform', _PAD_XY)):
+        sdf = re.sub(rf'(<model name="{name}">\s*<static>true</static>\s*<pose>)'
+                     r'[-\d.]+ [-\d.]+', rf'\g<1>{x:.3f} {y:.3f}', sdf)
+    dolls = _doll_models(models_dir, out_dir)
+    extra = [_south_wall()]
+    for ((x, y, yaw), k) in _DOLLS[:len(dolls)]:
+        extra.append(f'<include><name>doll_{k + 1}</name><pose>{x} {y} 0.02 0 0 '
+                     f'{yaw}</pose><uri>model://{dolls[k]}</uri></include>')
+    return sdf.replace('</world>', '\n'.join(extra) + '\n</world>')
+
+
 def _patched_world(path, light_scale=1.0):
     """Copy the world to /tmp with any missing PX4 sensor systems added and
     the lighting scaled by light_scale.
@@ -101,8 +246,12 @@ def _patched_world(path, light_scale=1.0):
            for fn, name in _WORLD_SYSTEMS if fn not in sdf]
     if 'spherical_coordinates' not in sdf:
         add.insert(0, _ORIGIN)
-    if not add and abs(light_scale - 1.0) < 1e-6:
+    course = os.path.basename(path).startswith('imav2026_indoor_v9')
+    if not add and abs(light_scale - 1.0) < 1e-6 and not course:
         return path
+    if course:
+        sdf = _real_course(sdf, os.path.join(os.path.dirname(path), 'models'),
+                           _SIM_MODELS)
     # AFTER the world's own systems, as in the worlds where flow works: with
     # the flow system loaded ahead of physics/sensors it never creates its
     # sensor (PX4 subscribes to the flow topic and nothing ever publishes).
@@ -157,7 +306,7 @@ def _setup(context):
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', ':'.join([
             os.path.dirname(get_package_share_directory('imav_indoor_2026')),
             os.path.join(sitl_src, 'world'),
-            os.path.join(sitl_src, 'world', 'models')])),
+            os.path.join(sitl_src, 'world', 'models'), _SIM_MODELS])),
         AppendEnvironmentVariable('GZ_SIM_SYSTEM_PLUGIN_PATH',
                                   ':'.join(plugin_dirs)),
     ]
@@ -342,8 +491,8 @@ def generate_launch_description():
                                           '(the worlds and models are not installed).'),
         DeclareLaunchArgument('px4_dir', default_value='~/PX4-Autopilot'),
         DeclareLaunchArgument('world', default_value='imav2026_indoor_v9'),
-        DeclareLaunchArgument('x', default_value='-2.0'),
-        DeclareLaunchArgument('y', default_value='-6.5'),
+        DeclareLaunchArgument('x', default_value='-2.75'),
+        DeclareLaunchArgument('y', default_value='-6.47'),
         DeclareLaunchArgument('yaw', default_value='1.5708'),
         DeclareLaunchArgument('marker_id', default_value='2'),
         DeclareLaunchArgument('lidar', default_value='true',
