@@ -420,6 +420,13 @@ def _setup(context):
         # (slow_land_speed), so at the 0.7 default PX4 never agrees it has
         # landed and refuses the disarm. SET THE SAME ON THE AIRCRAFT.
         'MPC_LAND_SPEED': 0.1,
+        # Rangefinder as a HEIGHT source only below 0.5 m (takeoff, landing).
+        # At the 5 m default it was fusing as height at traverse height, so
+        # the floor -> window-sill step (3.9 m -> 0.6 m) reset EKF2's height,
+        # which ran away (+3.8 -> -5.5 m, z invalid ~4 s) and the node had
+        # to land -- inside the room. Above 0.5 m: baro height, the range
+        # only tracks terrain, which is what a sill is.
+        'EKF2_RNG_A_HMAX': 0.5,
     }
     env_params = ' '.join(f'PX4_PARAM_{k}={v}' for k, v in params.items())
     set_params = '; '.join(f'bin/px4-param set {k} {v}' for k, v in params.items())
