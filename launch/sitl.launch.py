@@ -424,13 +424,11 @@ def _setup(context):
         'EKF2_GPS_CTRL': 0, 'EKF2_OF_CTRL': 1, 'EKF2_RNG_CTRL': 1,
         'EKF2_HGT_REF': 1, 'EKF2_MIN_RNG': 0.1, 'COM_ARM_WO_GPS': 1,
         'NAV_RCL_ACT': 0, 'NAV_DLL_ACT': 0, 'COM_RCL_EXCEPT': 4,
-        # Barometer ON as a backup height source, as on the aircraft. With it
-        # off, the rangefinder was the ONLY height source and looking down at
-        # the window sill mid-traverse (< EKF2_MIN_RNG) invalidated altitude
-        # inside the room. (It was switched off after a baro fault in the
-        # scaled world; the earlier multi-EKF and stray-PX4 problems may have
-        # been behind that.)
-        'EKF2_BARO_CTRL': 1,
+        # NO barometer, as on the aircraft: height is the TFmini Plus only,
+        # x/y the PMW3901. (EKF2_HGT_REF stays 1 so EKF2 still keeps a
+        # terrain estimate from the range, which flow needs to start; with
+        # the baro off it falls back to the range for height.)
+        'EKF2_BARO_CTRL': 0,
         # No RC in SITL: without this PX4 raises manual_control_signal_lost
         # and drops out of Offboard into Hold.
         'COM_RC_IN_MODE': 4,
@@ -454,18 +452,6 @@ def _setup(context):
         # (slow_land_speed), so at the 0.7 default PX4 never agrees it has
         # landed and refuses the disarm. SET THE SAME ON THE AIRCRAFT.
         'MPC_LAND_SPEED': 0.1,
-        # Rangefinder as a HEIGHT source only below 0.5 m (takeoff, landing).
-        # At the 5 m default it was fusing as height at traverse height, so
-        # the floor -> window-sill step (3.9 m -> 0.6 m) reset EKF2's height,
-        # which ran away (+3.8 -> -5.5 m, z invalid ~4 s) and the node had
-        # to land -- inside the room. Above 0.5 m: baro height, the range
-        # only tracks terrain, which is what a sill is.
-        'EKF2_RNG_A_HMAX': 0.5,
-        # No baro auto-calibration to GPS altitude. With it on, the sim GPS's
-        # 488 m elevation was applied as a 5.7 kPa (~480 m) step offset
-        # (CAL_BARO0_OFF) -- GPS fused or not -- and EKF2 faulted the baro
-        # (cs_baro_fault). That was behind every "baro fault" today.
-        'SENS_BAR_AUTOCAL': 0,
     }
     env_params = ' '.join(f'PX4_PARAM_{k}={v}' for k, v in params.items())
     set_params = '; '.join(f'bin/px4-param set {k} {v}' for k, v in params.items())
@@ -484,7 +470,7 @@ def _setup(context):
     px4_params = ExecuteProcess(
         cmd=['bash', '-c',
              f'cd {px4_dir}/build/px4_sitl_default && {set_params}; '
-             'echo "SITL PARAMS SET: flow x/y, rangefinder + baro height, no GPS, no EV, no RC"; '
+             'echo "SITL PARAMS SET: flow x/y (PMW3901), rangefinder height (TFmini), NO baro, no GPS, no EV, no RC"; '
              f'echo "SITL ISOLATED: ROS_DOMAIN_ID={domain}, localhost only -- export the same in the mission terminal"; '
              # One-shot health report after EKF2 has had time to settle, so a
              # refused arm or a flapping position is explained in this log.
