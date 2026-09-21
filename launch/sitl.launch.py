@@ -21,6 +21,14 @@ PX4 SITL (standalone, attaches to the spawned model), the uXRCE-DDS agent
 (UDP 8888), the ROS<->gz bridge and aruco_pose reading the sim down camera.
 The flight node is run by hand in a second terminal, as on the real drone.
 
+ISOLATION -- READ THIS. The sim runs in its own ROS domain (ros_domain, default
+42) with discovery limited to this machine, and PX4 SITL's DDS client is put in
+the same domain (UXRCE_DDS_DOM_ID). On a shared Wi-Fi, domain 0 can carry a REAL
+vehicle's /fmu topics; a sim node there reads the real vehicle's state and
+sends it commands. The terminal that runs the mission node MUST export the same:
+
+    export ROS_DOMAIN_ID=42 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+
 SENSORS AND ESTIMATOR, matched to the aircraft rather than PX4's SITL default:
     x/y     PMW3901 optical flow (the sim flow camera is its 42 deg FOV)
     height  baro reference + TFmini Plus (conditional): the sim's single-beam
@@ -39,7 +47,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (AppendEnvironmentVariable, DeclareLaunchArgument,
                             ExecuteProcess, IncludeLaunchDescription,
-                            OpaqueFunction, TimerAction)
+                            OpaqueFunction, SetEnvironmentVariable, TimerAction)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -117,7 +125,10 @@ def _setup(context):
                                            if os.path.isdir(plugins) else [])
         if os.path.isdir(os.path.join(plugins, d)))
 
+    domain = arg('ros_domain')
     env = [
+        SetEnvironmentVariable('ROS_DOMAIN_ID', domain),
+        SetEnvironmentVariable('ROS_AUTOMATIC_DISCOVERY_RANGE', 'LOCALHOST'),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', ':'.join([
             os.path.dirname(get_package_share_directory('imav_indoor_2026')),
             os.path.join(sitl_src, 'world'),
@@ -167,6 +178,8 @@ def _setup(context):
     # Set twice: as PX4_PARAM_* (read by rcS at boot on PX4 >= 1.14) and
     # again with px4-param once it is up, for builds that ignore the env.
     params = {
+        # The DDS client's domain: MUST match ROS_DOMAIN_ID (see ISOLATION).
+        'UXRCE_DDS_DOM_ID': int(domain),
         'EKF2_GPS_CTRL': 0, 'EKF2_OF_CTRL': 1, 'EKF2_RNG_CTRL': 1,
         'EKF2_HGT_REF': 1, 'EKF2_MIN_RNG': 0.1, 'COM_ARM_WO_GPS': 1,
         'NAV_RCL_ACT': 0, 'NAV_DLL_ACT': 0, 'COM_RCL_EXCEPT': 4,
@@ -217,6 +230,7 @@ def _setup(context):
         cmd=['bash', '-c',
              f'cd {px4_dir}/build/px4_sitl_default && {set_params}; '
              'echo "SITL PARAMS SET: flow x/y, rangefinder height, no baro, no GPS, no EV, no RC"; '
+             f'echo "SITL ISOLATED: ROS_DOMAIN_ID={domain}, localhost only -- export the same in the mission terminal"; '
              # One-shot health report after EKF2 has had time to settle, so a
              # refused arm or a flapping position is explained in this log.
              'sleep 15; echo "===== SITL HEALTH REPORT ====="; '
@@ -265,6 +279,9 @@ def _setup(context):
 
 def generate_launch_description():
     return LaunchDescription([
+        DeclareLaunchArgument('ros_domain', default_value='42',
+                              description='ROS domain for everything in the sim. '
+                                          'Never 0 on a shared network.'),
         DeclareLaunchArgument('sitl_src',
                               default_value='~/ros2_ws/src/imav_indoor_2026_sitl',
                               description='Source checkout of imav_indoor_2026_sitl '
