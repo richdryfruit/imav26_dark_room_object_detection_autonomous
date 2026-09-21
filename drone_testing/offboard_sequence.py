@@ -411,6 +411,10 @@ class OffboardSequence(Node):
             'climb_speed', self.CLIMB_SPEED))
         self.LAND_SPEED = float(self._declare_number(
             'land_speed', self.LAND_SPEED))
+        # s z may stay invalid in flight before the node lands (debounce).
+        self.HEIGHT_INVALID_GRACE = float(self._declare_number(
+            'height_invalid_grace', 0.5))
+        self._z_invalid_since = None
         # s to reach and settle at the takeoff altitude. Raise it in SITL,
         # which can run well below real time.
         self.TAKEOFF_TIMEOUT = float(self._declare_number(
@@ -1861,8 +1865,25 @@ class OffboardSequence(Node):
         # dropout is survivable, losing the height estimate entirely is not.
         lp = self.local_position
         if lp is None or not lp.z_valid:
-            self._begin_landing("height estimate went invalid")
-            return False
+            # Debounced. EKF2 flags z invalid for a single sample around a
+            # height reset -- e.g. the rangefinder stepping from the floor to
+            # a window sill mid-traverse -- and clears it ~0.1 s later. Landing
+            # on that blip aborted a traverse in the window. A height estimate
+            # that is really gone stays gone past the grace.
+            now = time.monotonic()
+            if self._z_invalid_since is None:
+                self._z_invalid_since = now
+            if (lp is None
+                    or now - self._z_invalid_since >= self.HEIGHT_INVALID_GRACE):
+                self._z_invalid_since = None
+                self._begin_landing("height estimate went invalid")
+                return False
+            self.get_logger().warning(
+                "Height estimate flagged invalid; holding for up to "
+                f"{self.HEIGHT_INVALID_GRACE:.1f} s before landing.",
+                throttle_duration_sec=0.5)
+            return True
+        self._z_invalid_since = None
 
         # The height estimate is only worth anything while the rangefinder is
         # actually being fused into it. If fusion stops mid-flight the estimate
