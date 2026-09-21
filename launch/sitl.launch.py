@@ -282,6 +282,20 @@ def _setup(context):
     share = get_package_share_directory('drone_testing')
     urdf = xacro.process_file(
         os.path.join(share, 'sim', 'sim_drone.urdf.xacro')).toxml()
+    # COLLISION FOOTPRINT OF THE REAL AIRFRAME (0.26 m), NOT THE x500's. The
+    # sim flies PX4's x500 (its dynamics and control allocation), but its
+    # rotors sit at +/-0.174 m with 0.14 m props: 0.63 m across, wider than
+    # the 0.60 m window, so the props struck the frame mid-traverse. Props no
+    # longer collide and the body plate is cut to 0.24 m; the landing gear
+    # (0.28 m, 0.227 m below the body) is untouched so it still stands. Pass
+    # the node the matching size: gear_below_camera 0.19, drone_height 0.29,
+    # drone_width 0.28.
+    import re as _re
+    urdf = _re.sub(r'<collision[^>]*>(?:(?!</collision>).)*?<box size="0\.2792307692[^"]*"/>'
+                   r'.*?</collision>', '', urdf, flags=_re.S)
+    urdf = urdf.replace('0.35355339059327373 0.35355339059327373 0.05',
+                        '0.24 0.24 0.05')
+
     # TFmini Plus: 0.1-12 m, ~2 cm noise. The only <max>100.0</max> in the
     # model is the downward lidar's range; the noise goes right after it.
     i = urdf.find('<max>100.0</max>')
