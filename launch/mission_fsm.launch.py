@@ -545,13 +545,13 @@ def generate_launch_description():
                         'camera basket is +/- h*tan(39 deg), so 2.50 m gives '
                         'about +/-2.0 m of capture width for the markers.'),
         DeclareLaunchArgument(
-            'window_altitude_m', default_value='1.85',
+            'window_altitude_m', default_value='1.90',
             description='m dropped to on the FIRST sighting of the window '
                         'marker, and climbed back out of on the second. The '
                         'dark room is NOT on this schedule -- its heights come '
                         'from the measured window pose via window_altitude().'),
         DeclareLaunchArgument(
-            'room_altitude', default_value='1.85',
+            'room_altitude', default_value='1.90',
             description='m the dark-room box pattern is flown at. NOT the '
                         'traverse height -- the traversal is lined up on the '
                         'measured window pose and goes through wherever the '

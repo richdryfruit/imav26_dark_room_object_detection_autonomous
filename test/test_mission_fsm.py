@@ -710,7 +710,7 @@ def test_the_climb_goes_to_the_cruise_altitude(fsm):
     """takeoff_altitude is deliberately ignored: one height for the markers."""
     assert fsm.TAKEOFF_ALTITUDE == pytest.approx(fsm.CRUISE_ALTITUDE)
     assert fsm.CRUISE_ALTITUDE == pytest.approx(2.50)
-    assert fsm.WINDOW_ALTITUDE == pytest.approx(1.85)
+    assert fsm.WINDOW_ALTITUDE == pytest.approx(1.90)
 
 
 def test_the_outbound_leg_drops_to_the_window_altitude(fsm):
@@ -984,7 +984,7 @@ def test_the_descent_to_the_window_altitude_happens_either_way(fsm):
     fsm._handle_cruise()          # ran out of distance, NO marker seen
 
     assert fsm.current_stage == fsm.ALT_CHANGE
-    assert fsm.alt_target == pytest.approx(fsm.WINDOW_ALTITUDE) == 1.85
+    assert fsm.alt_target == pytest.approx(fsm.WINDOW_ALTITUDE) == 1.90
     # ...and only then the strafe, and only then the window search.
     assert fsm.alt_next == 'offset'
     assert fsm.legs[fsm.leg_by_name['offset']].nxt == 'window'

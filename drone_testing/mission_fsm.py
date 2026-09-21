@@ -259,7 +259,7 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
     # the traverse height from the measured window pose, which is the only
     # honest source for it, and the room pattern inherits that.
     CRUISE_ALTITUDE = 2.50      # m. Takeoff, every leg, and the landing.
-    WINDOW_ALTITUDE = 1.85      # m. Dropped to on first sighting of the
+    WINDOW_ALTITUDE = 1.90      # m. Dropped to on first sighting of the
                                 # window marker; climbed back out of after
                                 # the room, on sighting it again.
     ROOM_MODE = 'lidar'         # lidar | box. 'lidar' divides the room into
@@ -267,7 +267,7 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
                                 # localizer's drift-free fix. 'box' restores
                                 # the inherited dead-reckoned leg pattern.
     TILE_MOVE_TIMEOUT = 25.0    # s to reach one tile centre before skipping it
-    ROOM_ALTITUDE = 1.85        # m the tile scan is flown at. NOT the
+    ROOM_ALTITUDE = 1.90        # m the tile scan is flown at. NOT the
                                 # traverse height: the traversal is lined up
                                 # on the measured window pose and goes through
                                 # wherever the aperture actually is, but once
