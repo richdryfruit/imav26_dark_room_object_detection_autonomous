@@ -1361,7 +1361,21 @@ def test_a_degenerate_fix_does_not_refresh_a_good_one(fsm):
     good_time = fsm.lidar_fix_time
     fsm.lidar_odom_callback(_lidar_msg(9.0, 9.0, 100.0))
     assert fsm.lidar_fix_time == good_time
-    assert fsm.lidar_fix[0] == pytest.approx(1.0), "position must not change"
+    assert fsm.lidar_fix[0] == pytest.approx(1.0 - fsm.ROOM_X / 2.0), \
+        "position must not change"
+
+
+def test_the_localizer_corner_origin_is_moved_to_the_room_centre(fsm):
+    """wall_localizer's origin is the SW interior corner; the scan plans about
+    the centre. A fix at the corner-frame room centre must read (0, 0), and one
+    0.8 m in on the real window axis (0.60 m from the west wall) must read
+    where the room-square test puts the entry."""
+    fsm.lidar_odom_callback(_lidar_msg(fsm.ROOM_X / 2.0, fsm.ROOM_Y / 2.0, 0.0025))
+    assert fsm.lidar_fix[0] == pytest.approx(0.0)
+    assert fsm.lidar_fix[1] == pytest.approx(0.0)
+    fsm.lidar_odom_callback(_lidar_msg(0.60, 0.80, 0.0025))
+    assert fsm.lidar_fix[0] == pytest.approx(-1.25 + 0.60)
+    assert fsm.lidar_fix[1] == pytest.approx(-1.25 + 0.80)
 
 
 

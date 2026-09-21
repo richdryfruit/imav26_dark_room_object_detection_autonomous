@@ -94,6 +94,7 @@ class LidarRoomScan:
 
     # ---- the arena frame ---------------------------------------------------
     FRONT_WALL = 'south'        # which wall becomes arena +X
+    ARENA_ORIGIN = 'corner'     # wall_localizer's origin: SW interior corner
     Y_AXIS = 'left'             # which side of it is +Y
 
     # ---- the room and the tiles -------------------------------------------
@@ -170,6 +171,14 @@ class LidarRoomScan:
             raise SystemExit(
                 f"y_axis must be 'left' or 'right'; got '{self.Y_AXIS}'.")
 
+        # Where wall_localizer puts the arena origin: 'corner' (its only
+        # convention -- the interior south-west corner) or 'centre' (a source
+        # that already reports about the room centre).
+        self.ARENA_ORIGIN = str(self.declare_parameter(
+            'arena_origin', self.ARENA_ORIGIN).value).strip().lower()
+        if self.ARENA_ORIGIN not in ('corner', 'centre'):
+            raise SystemExit(
+                f"arena_origin must be 'corner' or 'centre'; got '{self.ARENA_ORIGIN}'.")
         self.ROOM_X = float(self._declare_number('room_x', self.ROOM_X))
         self.ROOM_Y = float(self._declare_number('room_y', self.ROOM_Y))
         self.TILES_X = int(self.declare_parameter('tiles_x', self.TILES_X).value)
@@ -261,7 +270,17 @@ class LidarRoomScan:
         q = msg.pose.pose.orientation
         yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                          1.0 - 2.0 * (q.y * q.y + q.z * q.z))
-        x, y, yaw = self._relabel(float(p.x), float(p.y), yaw)
+        x, y = float(p.x), float(p.y)
+        if self.ARENA_ORIGIN == 'corner':
+            # wall_localizer's origin is the interior SOUTH-WEST CORNER (+X
+            # east along the south wall, +Y north). Everything here plans
+            # about the room CENTRE (+/- room/2, south wall at -Y), so shift
+            # before relabelling. Without this every fix read ~half a room
+            # north-east of the truth: the in-room moves clamped against the
+            # far walls and the scan was abandoned.
+            x -= self.ROOM_X / 2.0
+            y -= self.ROOM_Y / 2.0
+        x, y, yaw = self._relabel(x, y, yaw)
         self.lidar_fix = (x, y, float(p.z), yaw)
         self.lidar_fix_time = self._now()
 
