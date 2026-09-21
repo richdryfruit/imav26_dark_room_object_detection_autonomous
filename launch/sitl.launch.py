@@ -135,6 +135,13 @@ def _setup(context):
         cmd=['bash', '-c',
              f'cd {px4_dir}/build/px4_sitl_default && {set_params}; '
              'echo "SITL PARAMS SET: flow x/y, rangefinder height, no baro, no GPS, no RC"; '
+             # One-shot health report after EKF2 has had time to settle, so a
+             # refused arm or a flapping position is explained in this log.
+             'sleep 15; echo "===== SITL HEALTH REPORT ====="; '
+             'for p in ' + ' '.join(params) + '; do bin/px4-param show $p | grep -E "^ *[x+*]"; done; '
+             'bin/px4-commander check; bin/px4-ekf2 status; '
+             'bin/px4-listener estimator_status_flags -n 1 | grep -E "cs_(opt_flow|rng_hgt|rng_terrain|baro|mag_hdg|yaw_align|valid_fake|constant)|fs_bad|reject"; '
+             'echo "===== END HEALTH REPORT ====="; '
              f'find {plugins} -name libOpticalFlowSystem.so | grep -q . '
              '&& echo "optical flow plugin: found" '
              '|| echo "WARNING: libOpticalFlowSystem.so NOT BUILT -- no optical '
