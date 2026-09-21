@@ -277,6 +277,23 @@ class MissionFSMPart2(MissionFSM):
         finally:
             self.HEIGHT_INVALID_GRACE = normal
 
+    def _blind_push_done(self, total):
+        """Past the wall on the blind push: carry on into the room.
+
+        The push covered the whole remaining traverse (it is distance-
+        bounded), so the aircraft is through. Landing here would be landing
+        in the dark room; instead hold on the far side and let the room hold
+        -- on the 2D lidar, which does not need the flow -- take over.
+        """
+        if self.phase in (self.PHASE_OUTSIDE, self.PHASE_IN):
+            self.get_logger().warning(
+                f"TRAVERSE: blind push covered the remaining "
+                f"{self.blind_traverse_left:.2f} m; treating the window as "
+                "passed and handing over to the room hold (lidar).")
+            self._begin_clear(f"through on the blind push ({total:.2f} m)")
+            return
+        super()._blind_push_done(total)
+
     # ------------------------------------------------------------ the way out
 
     def _begin_room(self):

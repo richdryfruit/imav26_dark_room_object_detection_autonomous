@@ -1000,6 +1000,8 @@ class WindowTraverse(WindowScan):
                                         # effective_standoff().
         self.traverse_window = None     # the estimate it was committed from
         self.blind_traverse_since = None
+        self.blind_traverse_limit = self.BLIND_TRAVERSE_SECONDS
+        self.blind_traverse_left = 0.0
 
         self.align_in_band_since = None
         self.outcome = 'not attempted'
@@ -2268,28 +2270,45 @@ class WindowTraverse(WindowScan):
         out of the frame, not a way to complete the mission.
         """
         now = time.monotonic()
+        total = (self.traverse_standoff or self.STANDOFF_DISTANCE) + self.EXIT_DISTANCE
         if self.blind_traverse_since is None:
             self.blind_traverse_since = now
+            # Bounded by DISTANCE as well as time: push only as far as the
+            # rest of the traverse, measured where vision was lost. A time
+            # limit alone let an 8 s push cross a whole 5 m room into the
+            # far wall.
+            left = max(0.0, total - self._distance_along_traverse())
+            self.blind_traverse_limit = min(
+                self.BLIND_TRAVERSE_SECONDS,
+                left / max(self.TRAVERSE_SPEED, 0.05) + 0.5)
+            self.blind_traverse_left = left
             self.get_logger().error(
                 "TRAVERSE: vision lost mid-run. Pushing on open-loop along the "
-                f"committed heading for up to {self.BLIND_TRAVERSE_SECONDS:.1f} s "
-                "rather than stopping in the window.")
+                f"committed heading for {self.blind_traverse_limit:.1f} s "
+                f"(the remaining {left:.2f} m) rather than stopping in the window.")
 
         elapsed = now - self.blind_traverse_since
-        if elapsed >= self.BLIND_TRAVERSE_SECONDS:
-            along = self._distance_along_traverse()
-            self.outcome = (
-                f"BLIND: vision lost mid-traverse, pushed on for "
-                f"{self.BLIND_TRAVERSE_SECONDS:.1f} s and reached {along:.2f} m of "
-                f"{(self.traverse_standoff or self.STANDOFF_DISTANCE) + self.EXIT_DISTANCE:.2f} m")
-            self._begin_landing(
-                f"vision did not come back within {self.BLIND_TRAVERSE_SECONDS:.1f} s "
-                "of the blind push")
+        if elapsed >= self.blind_traverse_limit:
+            self._blind_push_done(total)
             return
 
         self.get_logger().warning(
-            f"TRAVERSE: blind, {self.BLIND_TRAVERSE_SECONDS - elapsed:.1f} s left.",
+            f"TRAVERSE: blind, {self.blind_traverse_limit - elapsed:.1f} s left.",
             throttle_duration_sec=0.5)
+
+    def _blind_push_done(self, total):
+        """The bounded blind push ran out without vision. Default: land.
+
+        Subclasses that have another way to know where they are on the far
+        side (a lidar in the room) may treat a push that covered the whole
+        remaining distance as a completed traverse instead.
+        """
+        self.outcome = (
+            f"BLIND: vision lost mid-traverse, pushed on "
+            f"{self.blind_traverse_left:.2f} m open-loop of {total:.2f} m")
+        self._begin_landing(
+            f"vision did not come back within {self.blind_traverse_limit:.1f} s "
+            "of the blind push")
 
     def _blind_traverse_active(self):
         return (self.current_stage == self.TRAVERSE

@@ -124,3 +124,25 @@ def test_a_landing_during_a_crossing_releases_the_hold(fsm):
     fsm._enter_stage(fsm.LANDING)
     fsm._update_crossing()
     assert not fsm._crossing
+
+
+def test_blind_push_is_bounded_by_the_remaining_distance(fsm):
+    fsm.TRAVERSE_SPEED = 0.6
+    fsm.BLIND_TRAVERSE_SECONDS = 8.0
+    fsm.traverse_standoff, fsm.EXIT_DISTANCE = 2.71, 1.76
+    fsm._distance_along_traverse = lambda: 3.15      # 1.32 m left
+    fsm._enter_stage(fsm.TRAVERSE)
+    fsm.blind_traverse_since = None
+    fsm._handle_blind_traverse()
+    assert fsm.blind_traverse_limit == pytest.approx(1.32 / 0.6 + 0.5)
+    assert fsm.blind_traverse_limit < 8.0
+
+
+def test_blind_push_done_inbound_goes_on_into_the_room_not_down(fsm):
+    fsm.phase = fsm.PHASE_IN
+    fsm.blind_traverse_left = 1.3
+    fsm.blind_traverse_limit = 2.7
+    landed = []
+    fsm._begin_landing = landed.append
+    fsm._blind_push_done(4.47)
+    assert fsm.current_stage == fsm.CLEAR and not landed
