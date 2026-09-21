@@ -24,7 +24,6 @@ function _colcon_prefix_chain_powershell_source_script {
 
 # source chained prefixes
 _colcon_prefix_chain_powershell_source_script "/opt/ros/jazzy/local_setup.ps1"
-_colcon_prefix_chain_powershell_source_script "/home/ark-jetson-orin-2/imav26-ws-2/install/local_setup.ps1"
 _colcon_prefix_chain_powershell_source_script "/home/ark-jetson-orin-2/imav26-ws-2/ws_ros2/install/local_setup.ps1"
 
 # source this prefix

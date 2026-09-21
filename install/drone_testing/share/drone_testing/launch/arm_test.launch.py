@@ -29,13 +29,13 @@ def generate_launch_description():
 
     # The PX4 uXRCE-DDS agent is MicroXRCEAgent, not micro_ros_agent -- the
     # latter is the micro-ROS agent and is not what PX4 speaks to.
-    microxrce_agent = ExecuteProcess(
-        cmd=['MicroXRCEAgent', 'serial',
-             '--dev', LaunchConfiguration('serial_dev'),
-             '-b', LaunchConfiguration('baudrate')],
-        name='micro_xrce_dds_agent',
-        output='screen',
-    )
+    microxrce_node = Node(
+            package='micro_ros_agent',
+            executable='micro_ros_agent',
+            name='micro_xrce_dds_agent',
+            output='screen',
+            arguments=['serial', '--dev', '/dev/ttyTHS1', '-b', '921600'],
+        )
 
     # PX4 finishes creating its publishers ~7 s after the agent comes up:
     # ~6 s for the session handshake, then ~1 s to enumerate all 65 topics.
@@ -69,6 +69,6 @@ def generate_launch_description():
             'baudrate', default_value='921600',
             description='Serial baudrate; must match PX4 SER_TEL2_BAUD.'),
         SetEnvironmentVariable('ROS_DOMAIN_ID', LaunchConfiguration('px4_domain_id')),
-        microxrce_agent,
+        microxrce_node,
         mission_node,
     ])

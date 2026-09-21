@@ -570,9 +570,20 @@ class DollDetect(Node):
         cv2.putText(frame, label, (x1, max(12, y1 - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 2)
 
-    def _publish_counts(self):
+    def _publish_counts(self, force=False):
+        """Publish the counts, by default only when they have changed.
+
+        force=True is the once-a-second heartbeat from report_timer, and it is
+        there for the same reason that timer publishes /doll_report
+        unconditionally: a topic that only publishes on change has nothing in
+        it for the minute before the first doll, so anything subscribing late
+        -- a display started after the mission, a bag opened at the wrong
+        moment -- sits on an empty topic and cannot tell "the count is zero"
+        from "nothing is running". The dedup still applies to the per-frame
+        path, which is where the message rate would otherwise come from.
+        """
         payload = (self.visible, self.dolls.total)
-        if payload == self._last_published:
+        if payload == self._last_published and not force:
             return
         self._last_published = payload
         visible = Int32()
@@ -593,6 +604,11 @@ class DollDetect(Node):
         msg = String()
         msg.data = f"{self.dolls.total}|{self.dolls.report()}"
         self.report_pub.publish(msg)
+
+        # Same argument as the docstring above, applied to the counts: this is
+        # what a late subscriber (doll_count_gui, room_display) needs in order
+        # to show 0 rather than "no data" before the first doll.
+        self._publish_counts(force=True)
 
         if self.enabled:
             self.get_logger().info(

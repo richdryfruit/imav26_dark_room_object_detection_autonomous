@@ -110,6 +110,7 @@ import cv2
 import numpy as np
 
 import rclpy
+from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
@@ -527,6 +528,19 @@ class WindowDetect(Node):
                                 # tenth the bytes of quality 95
     STREAM_PORT = 8080          # 0 disables the browser stream
 
+    def _declare_number(self, name, default):
+        """Declare a numeric parameter that tolerates int and float alike.
+
+        Launch feeds parameters in as YAML, so `min_area:=1500` arrives as an
+        INTEGER and rclpy rejects it against a DOUBLE-typed declaration --
+        and `stream_scale:=1` arrives as an INTEGER against a double one.
+        Declaring dynamically typed and converting at the call site means both
+        spellings work. Same helper as OffboardTakeoff._declare_number.
+        """
+        return self.declare_parameter(
+            name, default,
+            ParameterDescriptor(dynamic_typing=True)).value
+
     def __init__(self):
         super().__init__('window_detect')
 
@@ -538,20 +552,20 @@ class WindowDetect(Node):
         self.publish_mask = bool(self.declare_parameter('publish_mask', False).value)
         self.publish_compressed = bool(self.declare_parameter(
             'publish_compressed', True).value)
-        self.jpeg_quality = int(self.declare_parameter(
-            'jpeg_quality', self.JPEG_QUALITY).value)
-        self.stream_port = int(self.declare_parameter(
-            'stream_port', self.STREAM_PORT).value)
+        self.jpeg_quality = int(self._declare_number(
+            'jpeg_quality', self.JPEG_QUALITY))
+        self.stream_port = int(self._declare_number(
+            'stream_port', self.STREAM_PORT))
         # Downscale before encoding. Halving each side quarters the bytes and
         # a window is still perfectly judgeable at 640x360.
-        self.stream_scale = float(self.declare_parameter('stream_scale', 0.5).value)
+        self.stream_scale = float(self._declare_number('stream_scale', 0.5))
         self.color = str(self.declare_parameter('color', 'green').value).strip().lower()
-        self.min_area = float(self.declare_parameter('min_area', float(self.MIN_AREA)).value)
-        self.border_margin = float(self.declare_parameter(
-            'border_margin', float(self.BORDER_MARGIN)).value)
-        self.detect_frames = int(self.declare_parameter('detect_frames', self.DETECT_FRAMES).value)
-        self.lost_frames = int(self.declare_parameter('lost_frames', self.LOST_FRAMES).value)
-        self.depth_scale = float(self.declare_parameter('depth_scale', self.DEPTH_SCALE).value)
+        self.min_area = float(self._declare_number('min_area', float(self.MIN_AREA)))
+        self.border_margin = float(self._declare_number(
+            'border_margin', float(self.BORDER_MARGIN)))
+        self.detect_frames = int(self._declare_number('detect_frames', self.DETECT_FRAMES))
+        self.lost_frames = int(self._declare_number('lost_frames', self.LOST_FRAMES))
+        self.depth_scale = float(self._declare_number('depth_scale', self.DEPTH_SCALE))
         self.depth_units = 'cm' if abs(self.depth_scale - 100.0) < 1e-6 else 'm'
         self.camera_info_topic = str(self.declare_parameter(
             'camera_info_topic', self.CAMERA_INFO_TOPIC).value).strip()
@@ -578,8 +592,8 @@ class WindowDetect(Node):
                 f"{self.camera_info_topic}")
         self.publish_geometry_topic = bool(self.declare_parameter(
             'publish_geometry', True).value)
-        self.fallback_hfov = math.radians(float(self.declare_parameter(
-            'fallback_hfov_deg', self.FALLBACK_HFOV_DEG).value))
+        self.fallback_hfov = math.radians(float(self._declare_number(
+            'fallback_hfov_deg', self.FALLBACK_HFOV_DEG)))
 
         # Cap on how often the HSV/contour/depth pipeline actually runs. The
         # D435i delivers 30 fps and the pipeline is the single largest CPU
@@ -587,7 +601,7 @@ class WindowDetect(Node):
         # and the traversal node medians samples over a 2.5 s buffer, so
         # anything above ~10 Hz buys accuracy nobody downstream can use, at
         # the price of CPU the offboard heartbeat needs. 0 = no limit.
-        self.max_fps = float(self.declare_parameter('max_fps', self.MAX_FPS).value)
+        self.max_fps = float(self._declare_number('max_fps', self.MAX_FPS))
         self.min_frame_interval = (1.0 / self.max_fps) if self.max_fps > 0.0 else 0.0
         self.last_processed = 0.0
         self.frames_skipped = 0

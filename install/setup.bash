@@ -22,9 +22,6 @@ _colcon_prefix_chain_bash_source_script() {
 COLCON_CURRENT_PREFIX="/opt/ros/jazzy"
 _colcon_prefix_chain_bash_source_script "$COLCON_CURRENT_PREFIX/local_setup.bash"
 # setting COLCON_CURRENT_PREFIX avoids determining the prefix in the sourced script
-COLCON_CURRENT_PREFIX="/home/ark-jetson-orin-2/imav26-ws-2/install"
-_colcon_prefix_chain_bash_source_script "$COLCON_CURRENT_PREFIX/local_setup.bash"
-# setting COLCON_CURRENT_PREFIX avoids determining the prefix in the sourced script
 COLCON_CURRENT_PREFIX="/home/ark-jetson-orin-2/imav26-ws-2/ws_ros2/install"
 _colcon_prefix_chain_bash_source_script "$COLCON_CURRENT_PREFIX/local_setup.bash"
 

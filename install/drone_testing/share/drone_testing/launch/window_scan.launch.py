@@ -171,6 +171,45 @@ def generate_launch_description():
                      LaunchConfiguration('emitter')],
                 output='screen',
             ),
+            # Global time, set here for the same reason as the emitter: it is
+            # a runtime parameter, not an rs_launch.py argument.
+            #
+            # This is what produces the recurring
+            #     messenger-libusb.cpp:42 control_transfer returned error,
+            #     index: 768, error: Resource temporarily unavailable
+            # warnings. global_time_enabled starts librealsense's
+            # time_diff_keeper thread, which keeps re-reading the device
+            # hardware clock over a UVC extension-unit control transfer so it
+            # can express frame stamps in the host clock. On this Jetson that
+            # control transfer intermittently returns EAGAIN and librealsense
+            # logs it -- the stream itself is unaffected, but it is noise on
+            # every run, and it is the same polling that escalated to the
+            # "time_diff_keeper polling: usb device disconnected" errors in
+            # 2026-09-12-15_50_02.log.
+            #
+            # Safe to turn off HERE specifically: nothing in this launch reads
+            # image header stamps. window_detect ages its depth frame with
+            # time.monotonic() taken at receipt (window_detect.py:753), and
+            # publish_tf is already false, so the stamp domain is unused. If
+            # you add a node that does compare stamps to ROS time -- a VIO
+            # bridge, a TF consumer, message_filters sync against another
+            # sensor -- set global_time:=true and live with the warning.
+            ExecuteProcess(
+                cmd=['ros2', 'param', 'set',
+                     ['/', LaunchConfiguration('camera_namespace'),
+                      '/', LaunchConfiguration('camera_name')],
+                     'depth_module.global_time_enabled',
+                     LaunchConfiguration('global_time')],
+                output='screen',
+            ),
+            ExecuteProcess(
+                cmd=['ros2', 'param', 'set',
+                     ['/', LaunchConfiguration('camera_namespace'),
+                      '/', LaunchConfiguration('camera_name')],
+                     'rgb_camera.global_time_enabled',
+                     LaunchConfiguration('global_time')],
+                output='screen',
+            ),
         ],
         condition=IfCondition(LaunchConfiguration('camera')),
     )
@@ -307,6 +346,15 @@ def generate_launch_description():
                         'the colour sensor, so the HSV detection does not '
                         'care. Applied by `ros2 param set` after startup, '
                         'because it is not an rs_launch.py argument.'),
+        DeclareLaunchArgument(
+            'global_time', default_value='false',
+            description='librealsense host-clock frame stamps. OFF by default: '
+                        'the polling thread behind it is what emits the '
+                        'recurring "control_transfer returned error ... '
+                        'Resource temporarily unavailable" warnings, and '
+                        'nothing in this launch reads image header stamps. '
+                        'Set true if you add a node that does (VIO bridge, TF '
+                        'consumer, message_filters sync).'),
         DeclareLaunchArgument(
             'hole_filling', default_value='false',
             description='LEAVE THIS FALSE. The hole-filling filter invents '

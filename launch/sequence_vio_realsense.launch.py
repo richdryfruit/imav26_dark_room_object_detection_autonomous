@@ -190,7 +190,8 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import (DeclareLaunchArgument, GroupAction,
+                            IncludeLaunchDescription, TimerAction)
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -216,12 +217,22 @@ def generate_launch_description():
     # px4_bridge:=true is the point of this file -- the stack's own default is
     # false, because on the bench you want the odometry without anything
     # reaching the flight controller.
-    vio_stack = IncludeLaunchDescription(
+    # Scoped. IncludeLaunchDescription does NOT push a scope in Jazzy: its
+    # launch_arguments land in the SHARED context, and every parent argument
+    # forwards down into rs_launch.py, which warns about each one it does not
+    # recognise ("Parameter 'sequence' is not supported" x20). The noise buries
+    # real errors, and the leak in the other direction is how a node gated on
+    # an argument the include also sets gets silently skipped.
+    vio_stack = GroupAction([IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(
             get_package_share_directory('rtabmap_realsense_vio'),
             'launch', 'realsense_stereo_imu_rtabmap.launch.py')]),
         launch_arguments={
             'px4_bridge': 'true',
+            # This file runs its own agent (microxrce_node). Without this the
+            # included stack starts a second one on the same serial port and
+            # the loser dies -- see rtabmap_realsense_vio README.
+            'agent': 'false',
             'cam_x': LaunchConfiguration('cam_x'),
             'cam_y': LaunchConfiguration('cam_y'),
             'cam_z': LaunchConfiguration('cam_z'),
@@ -231,8 +242,18 @@ def generate_launch_description():
             'emitter': LaunchConfiguration('emitter'),
             'f2m_max_size': LaunchConfiguration('f2m_max_size'),
         }.items(),
-        condition=IfCondition(LaunchConfiguration('vio')),
-    )
+    )], scoped=True, forwarding=True,
+        # forwarding MUST stay True: the launch_arguments values above are
+        # themselves LaunchConfiguration('cam_x') and friends, which resolve in
+        # this group's scope. forwarding=False makes the include fail with
+        # "launch configuration 'cam_x' does not exist".
+        #
+        # The cost of that is noise: rs_launch.py sees every parent argument and
+        # warns "Parameter 'sequence' is not supported" for each one. ~37 yellow
+        # lines at startup, all harmless -- the stack still comes up correctly.
+        # scoped=True is what matters here, keeping this include's own sets
+        # (px4_bridge, agent) from leaking back out into the parent context.
+        condition=IfCondition(LaunchConfiguration('vio')))
 
     # 30 s, not the ZED file's 10 s. Two things have to finish first: the
     # uXRCE-DDS session (PX4 creates its /fmu/out writers LAST, ~7 s after the
@@ -351,12 +372,16 @@ def generate_launch_description():
             description='Start the RealSense + RTAB-Map + PX4 bridge stack here. '
                         'false if you already run it from another terminal.'),
         DeclareLaunchArgument(
-            'emitter', default_value='1',
-            description='IR projector: 1 = on (default), 0 = off, 2 = auto. The usual '
-                        '"turn it off for VIO" advice assumes odometry that tracks the '
-                        'IR images; this pipeline is rgbd_odometry and also needs the '
-                        'DEPTH those dots produce, so it is a genuine trade-off. A/B it '
-                        'in your own arena before changing it.'),
+            'emitter', default_value='0',
+            description='IR projector. 0 = OFF and that is the only setting flown '
+                        'on this airframe: the projected dots are fixed to the '
+                        'camera and slide across the scene as it moves, which '
+                        'corrupts the feature tracking rgbd_odometry does on '
+                        'infra1. The passive-stereo depth penalty is accepted. '
+                        'Note the projector is still on for the first ~15 s of '
+                        'every run -- rs_launch.py drops emitter_enabled as a '
+                        'launch argument, so it is applied by a param set after '
+                        'startup.'),
         DeclareLaunchArgument(
             'f2m_max_size', default_value='500',
             description='OdomF2M/MaxSize. Bounds the local map so the odometry rate '

@@ -8,8 +8,9 @@
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/zed_localization.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__init__.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/precision_land.py
-/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/window_detect_darkroom.py
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/doll_count_gui.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/pixhawk_node.py
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/doll_report_text.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/lcd_status.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/window_detect.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/jw_ros2_wac.py
@@ -24,6 +25,7 @@
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/offboard_sequence.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/ring_detect.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/offboard_mission.py
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/mission_fsm.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/window_room_traverse.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/ring_grab.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/ring_math.py
@@ -33,6 +35,7 @@
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/preflight_check.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/room_display.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/px4_topics.py
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/room_lidar_scan.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/Window_traversal_dot_cross.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/homography_mlx_rgb/__pycache__/live.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/homography_mlx_rgb/__pycache__/__init__.cpython-312.pyc
@@ -44,8 +47,9 @@
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/zed_localization.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/__init__.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/precision_land.cpython-312.pyc
-/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/window_detect_darkroom.cpython-312.pyc
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/doll_count_gui.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/pixhawk_node.cpython-312.pyc
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/doll_report_text.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/lcd_status.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/window_detect.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/jw_ros2_wac.cpython-312.pyc
@@ -60,6 +64,7 @@
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/offboard_sequence.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/ring_detect.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/offboard_mission.cpython-312.pyc
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/mission_fsm.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/window_room_traverse.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/ring_grab.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/ring_math.cpython-312.pyc
@@ -69,6 +74,7 @@
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/preflight_check.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/room_display.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/px4_topics.cpython-312.pyc
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/room_lidar_scan.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/python3.12/site-packages/drone_testing/__pycache__/Window_traversal_dot_cross.cpython-312.pyc
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/ament_index/resource_index/packages/drone_testing
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/package.xml
@@ -76,12 +82,15 @@
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/window_traverse.launch.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/sequence_vio_test.launch.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/sequence_test.launch.py
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/mission_fsm.launch.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/translate_test.launch.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/ring_grab.launch.py
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/darkroom_launch.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/window_room_traverse.launch.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/window_scan.launch.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/bar_mission.launch.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/precision_land.launch.py
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/window_traverse_ARKFLow.launch.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/sequence_vio_realsense.launch.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/arm_test.launch.py
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/share/drone_testing/launch/offboard_launch.launch.py
@@ -97,9 +106,12 @@
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/bar_cross
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/bar_detect
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/cam
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/doll_count_gui
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/doll_detect
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/doll_report_text
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/fc_reboot
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/lcd_status
+/home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/mission_fsm
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/offboard_mission
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/offboard_sequence
 /home/ark-jetson-orin-2/offboard_imav26_test/install/drone_testing/lib/drone_testing/offboard_sequence_vio

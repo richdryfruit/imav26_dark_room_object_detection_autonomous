@@ -82,6 +82,7 @@ thing in vehicle terms and commands nothing.
 """
 
 import math
+import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -202,6 +203,8 @@ class ArucoPose(Node):
 
     # ---- camera -----------------------------------------------------------
     CAMERA_INDEX = 1
+    # The Logitech B910, by serial number. See camera_device in __init__.
+    CAMERA_DEVICE = '/dev/v4l/by-id/usb-046d_0823_1469ADD0-video-index0'
     # 4:3 on purpose. The vertical field of view is what decides how low the
     # vehicle can go before the marker stops fitting in the frame, and 4:3 is
     # markedly taller than 16:9 on this sensor: with a 0.80 m marker and a
@@ -242,6 +245,17 @@ class ArucoPose(Node):
 
         self.camera_index = int(self.declare_parameter(
             'camera_index', self.CAMERA_INDEX).value)
+        # A STABLE device path, which wins over camera_index when set.
+        #
+        # /dev/videoN is assigned in plug order and the RealSense takes SIX of
+        # them (video0-5), so the down camera's index moves whenever the
+        # RealSense is connected or not. An index set with the RealSense
+        # unplugged opens a RealSense node once it is plugged in: the marker is
+        # never seen, and the RealSense driver can lose its device to it,
+        # taking the VIO and the window detection down too. The by-id path
+        # names this webcam by its serial number and never moves.
+        self.camera_device = str(self.declare_parameter(
+            'camera_device', self.CAMERA_DEVICE).value).strip()
         self.width = int(self.declare_parameter('width', self.WIDTH).value)
         self.height = int(self.declare_parameter('height', self.HEIGHT).value)
         self.fourcc = str(self.declare_parameter('fourcc', self.FOURCC).value)
@@ -334,9 +348,16 @@ class ArucoPose(Node):
         self.marker_points_pub = self.create_publisher(
             PointStamped, '/aruco/marker_points', 10)
 
-        self.cap = cv2.VideoCapture(self.camera_index)
+        source = self.camera_device or self.camera_index
+        if self.camera_device and not os.path.exists(self.camera_device):
+            raise SystemExit(
+                f"camera_device {self.camera_device} does not exist. Is the down "
+                "camera plugged in? `ls /dev/v4l/by-id/` lists what is.")
+        self.cap = (cv2.VideoCapture(self.camera_device, cv2.CAP_V4L2)
+                    if self.camera_device else cv2.VideoCapture(self.camera_index))
         if not self.cap.isOpened():
-            raise SystemExit(f"Could not open camera {self.camera_index}.")
+            raise SystemExit(f"Could not open camera {source}.")
+        self.get_logger().info(f"Down camera: {source}")
         if len(self.fourcc) == 4:
             self.cap.set(cv2.CAP_PROP_FOURCC,
                          cv2.VideoWriter_fourcc(*self.fourcc))
