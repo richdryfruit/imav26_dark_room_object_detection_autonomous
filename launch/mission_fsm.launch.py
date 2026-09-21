@@ -217,6 +217,7 @@ def generate_launch_description():
                     'ground_wait_seconds': LaunchConfiguration('ground_wait_seconds'),
                     'climb_speed': LaunchConfiguration('climb_speed'),
                     'land_speed': LaunchConfiguration('land_speed'),
+                    'height_invalid_grace': LaunchConfiguration('height_invalid_grace'),
                     'yaw_rate': LaunchConfiguration('yaw_rate'),
                     'takeoff_return_to_pad': LaunchConfiguration(
                         'takeoff_return_to_pad'),
@@ -888,6 +889,12 @@ def generate_launch_description():
         DeclareLaunchArgument('ground_wait_seconds', default_value='5.0'),
         DeclareLaunchArgument('climb_speed', default_value='0.35'),
         DeclareLaunchArgument('land_speed', default_value='0.15'),
+        DeclareLaunchArgument(
+            'height_invalid_grace', default_value='0.5',
+            description='s the height estimate may stay invalid in flight before '
+                        'the node lands. EKF2 blips z invalid for one sample at a '
+                        'height reset, e.g. the rangefinder stepping onto the '
+                        'window sill mid-traverse.'),
         DeclareLaunchArgument('yaw_rate', default_value='0.35',
                               description='rad/s. Also the rate the room '
                                           'pattern turns at.'),

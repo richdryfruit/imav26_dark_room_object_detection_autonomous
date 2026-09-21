@@ -87,6 +87,15 @@ class MissionFSMPart2(MissionFSM):
     FINAL_CENTRING_ATTEMPTS = 2 # centring tries before landing at P anyway
     SLOW_LAND_SPEED = 0.10      # m/s for the fallback descent at P
 
+    # ---- the way out ------------------------------------------------------
+    # 'retrace' (default): the window is UNMARKED on the inside, so it cannot
+    # be re-found from inside with the camera. The aircraft instead returns to
+    # the height it went in at and flies straight back out along the takeoff
+    # heading -- it entered on the window axis and the room hold (lidar) or
+    # the turn on the spot keeps it there. 'relock' is the inherited camera
+    # relock, for a window that is marked on both faces.
+    EXIT_MODE = 'retrace'
+
     WINDOW_MARKER_ID = 0        # the ArUco in front of the window
     FLIGHT_SECONDS = 420.0      # two traversals and the room. A backstop.
 
@@ -100,6 +109,13 @@ class MissionFSMPart2(MissionFSM):
         self.SLOW_LAND_SPEED = float(self._declare_number(
             'slow_land_speed', self.SLOW_LAND_SPEED))
 
+        self.EXIT_MODE = str(self.declare_parameter(
+            'exit_mode', self.EXIT_MODE).value).strip().lower()
+        if self.EXIT_MODE not in ('retrace', 'relock'):
+            raise SystemExit(
+                f"exit_mode must be 'retrace' or 'relock'; got '{self.EXIT_MODE}'.")
+        self.inbound_z = None           # target_z of the inbound traverse
+
         # Both strafes are always in the plan, even at window_offset 0: a
         # zero-length pure-distance leg just settles for leg_settle_seconds,
         # and MissionFSM._handle_clear hands over to 'offset_back' by name.
@@ -111,6 +127,10 @@ class MissionFSMPart2(MissionFSM):
             # Zero length: _handle_final drives it, not the cruise handler.
             Leg('final', back, 0.0, self.WINDOW_MARKER_ID, 'land',
                 retry=False),
+            # exit_mode 'retrace': straight back out, takeoff-frame BACKWARD
+            # (the window is ahead of the armed heading), pure distance.
+            Leg('exit', 'backward', self.INSIDE_DISTANCE + self.OUTSIDE_DISTANCE,
+                None, 'exit_clear'),
         ]
         self.leg_by_name = {leg.name: i for i, leg in enumerate(self.legs)}
 
@@ -165,6 +185,36 @@ class MissionFSMPart2(MissionFSM):
         self.get_logger().warning(
             f"ROOM DONE. DOLLS COUNTED: {self._doll_words()}.")
         super()._finish_tile_scan(outcome)
+
+    # ------------------------------------------------------------ the way out
+
+    def _begin_room(self):
+        # First call is straight after the inbound CLEAR, before the room
+        # height is commanded: target_z is still the traverse height.
+        if self.inbound_z is None:
+            self.inbound_z = self.target_z
+        super()._begin_room()
+
+    def _begin_relock(self):
+        if self.EXIT_MODE != 'retrace':
+            super()._begin_relock()
+            return
+        self.moving = False
+        self.yaw_remaining = 0.0
+        self.phase = self.PHASE_OUT
+        self.EXIT_DISTANCE = self.OUTSIDE_DISTANCE
+        self.MOVE_SPEED = self.APPROACH_SPEED
+        leg = self.legs[self.leg_by_name['exit']]
+        if self.inbound_z is not None and self.home_z is not None:
+            alt = self.home_z - self.inbound_z
+            self.get_logger().warning(
+                f"EXIT (retrace): back to the inbound traverse height "
+                f"{alt:.2f} m, then {leg.distance:.2f} m straight back out "
+                "along the takeoff heading. The window is unmarked inside, so "
+                "no camera relock.")
+            self._begin_alt_change(alt, 'exit', 'inbound traverse height')
+        else:
+            self._begin_leg_named('exit')
 
     # ------------------------------------------------------------ the start
 
@@ -305,6 +355,14 @@ class MissionFSMPart2(MissionFSM):
         self._final_attempt_failed(outcome)
 
     def _dispatch_after(self, nxt, on_marker=False):
+        if nxt == 'exit_clear':
+            # Outside again: the inherited far-side hold, which with phase OUT
+            # hands over to the mirrored strafe (MissionFSM._handle_clear).
+            self.alt_next = None
+            self.get_logger().warning("EXIT: out of the window. Holding, then "
+                                      "the mirrored strafe.")
+            self._enter_stage(self.CLEAR)
+            return
         if nxt != 'land':
             super()._dispatch_after(nxt, on_marker)
             return
@@ -334,6 +392,9 @@ class MissionFSMPart2(MissionFSM):
 
     def _phase_label(self):
         leg = self.current_leg()
+        if (leg is not None and leg.name == 'exit' and self.current_stage in
+                (self.CRUISE, self.MARKER_ALIGN, self.MARKER_HOLD)):
+            return 'EXITING'
         if (leg is not None and leg.name == 'final' and self.current_stage in
                 (self.CRUISE, self.MARKER_ALIGN, self.MARKER_HOLD)):
             return 'TO_MARKER'

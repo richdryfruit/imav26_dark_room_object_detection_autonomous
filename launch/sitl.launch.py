@@ -95,11 +95,26 @@ def _dim(sdf, scale):
 # from outside) .. -1.00 (right), 0.04 m thick. Openings are the MEASURED
 # openings; the colour is a 2 cm band on the outside face around each one.
 _WALL_Y, _WALL_L, _WALL_R, _WALL_H, _WALL_T = 4.50, -3.50, -1.00, 2.50, 0.04
-_BLUE = (_WALL_L + 0.30, _WALL_L + 0.90, 1.60, 2.20)   # x0, x1, z0, z1
-_RED = (_WALL_L + 1.75, _WALL_L + 2.25, 1.75, 2.25)
 _BAND = 0.02
-_MARKER_XY = (_WALL_L + 0.60 + 0.15, _WALL_Y - 1.67)    # 0.15 m right of blue axis
-_PAD_XY = (_MARKER_XY[0], _MARKER_XY[1] - 9.30)        # part 1's 9.3 m leg
+
+
+def _course(scale=1.0):
+    """Blue/red openings, marker and pad for a blue opening scaled by scale.
+
+    scale 1: as measured -- blue 0.60 m, centre 0.60 m from the left edge and
+    1.90 m up. Larger: the blue opening grows about its centre, then is pushed
+    back inside the wall (5 cm margin), and red moves right to stay clear.
+    The marker stays 1.67 m out and 0.15 m right of the blue axis.
+    """
+    w = 0.60 * scale
+    cx = min(max(0.60, 0.05 + w / 2), 2.45 - w / 2)
+    cz = min(max(1.90, 0.05 + w / 2), _WALL_H - 0.05 - w / 2)
+    blue = (_WALL_L + cx - w / 2, _WALL_L + cx + w / 2, cz - w / 2, cz + w / 2)
+    red_x0 = max(1.75, cx + w / 2 + 0.10)
+    red = (_WALL_L + red_x0, _WALL_L + min(red_x0 + 0.50, 2.45), 1.75, 2.25)
+    marker = (_WALL_L + cx + 0.15, _WALL_Y - 1.67)
+    pad = (marker[0], marker[1] - 9.30)
+    return blue, red, marker, pad
 # Three single dolls cut from MODERN_DOLL_FAMILY (4 dolls, 4 mesh pieces),
 # spread across the room floor, clear of the walls.
 _DOLLS = [((-3.10, 6.60, 1.0), 0), ((-1.40, 6.50, -2.0), 1), ((-1.45, 5.05, 2.6), 2)]
@@ -117,11 +132,10 @@ def _box(name, x0, x1, z0, z1, y, t, rgb):
             '</visual></link></model>')
 
 
-def _south_wall():
+def _south_wall(b, r):
     """The wall as boxes around the two openings, plus the colour bands."""
     L, R, T, H, y = _WALL_L, _WALL_R, _WALL_T, _WALL_H, _WALL_Y
     wall = '0.60 0.50 0.38'
-    b, r = _BLUE, _RED
     zlo, zhi = min(b[2], r[2]), max(b[3], r[3])
     parts = [
         ('room_S_bot', L, R, 0.0, zlo), ('room_S_top', L, R, zhi, H),
@@ -213,7 +227,7 @@ def _doll_models(models_dir, out_dir):
     return [f'IMAV_DOLL_{n}' for n in (1, 2, 3)]
 
 
-def _real_course(sdf, models_dir, out_dir):
+def _real_course(sdf, models_dir, out_dir, scale=1.0):
     """v9 -> the measured course: south wall, marker, pad, three dolls."""
     import re
     # Old south wall, window frames and the original doll families: out.
@@ -222,18 +236,19 @@ def _real_course(sdf, models_dir, out_dir):
     sdf = re.sub(r'(<include>\s*<name>baby_doll_\d+</name>.*?</include>)',
                  lambda m: '<!-- ' + m.group(1).replace('--', '- -') + ' -->',
                  sdf, flags=re.S)
-    for name, (x, y) in (('platform_1', _MARKER_XY), ('takeoff_platform', _PAD_XY)):
+    blue, red, marker, pad = _course(scale)
+    for name, (x, y) in (('platform_1', marker), ('takeoff_platform', pad)):
         sdf = re.sub(rf'(<model name="{name}">\s*<static>true</static>\s*<pose>)'
                      r'[-\d.]+ [-\d.]+', rf'\g<1>{x:.3f} {y:.3f}', sdf)
     dolls = _doll_models(models_dir, out_dir)
-    extra = [_south_wall()]
+    extra = [_south_wall(blue, red)]
     for ((x, y, yaw), k) in _DOLLS[:len(dolls)]:
         extra.append(f'<include><name>doll_{k + 1}</name><pose>{x} {y} 0.02 0 0 '
                      f'{yaw}</pose><uri>model://{dolls[k]}</uri></include>')
     return sdf.replace('</world>', '\n'.join(extra) + '\n</world>')
 
 
-def _patched_world(path, light_scale=1.0):
+def _patched_world(path, light_scale=1.0, window_scale=1.0):
     """Copy the world to /tmp with any missing PX4 sensor systems added and
     the lighting scaled by light_scale.
 
@@ -251,7 +266,7 @@ def _patched_world(path, light_scale=1.0):
         return path
     if course:
         sdf = _real_course(sdf, os.path.join(os.path.dirname(path), 'models'),
-                           _SIM_MODELS)
+                           _SIM_MODELS, window_scale)
     # AFTER the world's own systems, as in the worlds where flow works: with
     # the flow system loaded ahead of physics/sensors it never creates its
     # sensor (PX4 subscribes to the flow topic and nothing ever publishes).
@@ -278,7 +293,11 @@ def _setup(context):
     world_name = arg('world')
     world_file = _patched_world(
         os.path.join(sitl_src, 'world', world_name + '.sdf.world'),
-        float(arg('light_scale')))
+        float(arg('light_scale')), float(arg('window_scale')))
+    blue, _, marker, pad = _course(float(arg('window_scale')))
+    print(f"[sitl] blue opening x {blue[0]:.2f}..{blue[1]:.2f} z {blue[2]:.2f}.."
+          f"{blue[3]:.2f}; marker (id 2) {marker[0]:.2f},{marker[1]:.2f}; "
+          f"pad (id 0) {pad[0]:.2f},{pad[1]:.2f}", flush=True)
     share = get_package_share_directory('drone_testing')
     urdf = xacro.process_file(
         os.path.join(share, 'sim', 'sim_drone.urdf.xacro')).toxml()
@@ -481,9 +500,14 @@ def _setup(context):
         Node(package='lidar_loc', executable='scan_leveler', name='scan_leveler',
              output='screen', condition=lidar_on,
              parameters=[arena, {'use_sim_time': True}]),
+        # Heading from the compass, not the window-gap signature: the gap
+        # test picked the wrong wall family here (fix 0.8 m out, frame
+        # flipping). seed_yaw_offset = EKF2 heading of arena +X (east) = +90.
         Node(package='lidar_loc', executable='wall_localizer', name='wall_localizer',
              output='screen', condition=lidar_on,
-             parameters=[arena, {'use_sim_time': True}]),
+             parameters=[arena, {'use_sim_time': True,
+                                 'yaw_source': arg('lidar_yaw_source'),
+                                 'seed_yaw_offset': float(arg('lidar_seed_yaw'))}]),
         Node(package='lidar_loc', executable='pose_kf.py', name='pose_kf',
              output='screen', condition=lidar_on,
              parameters=[{'use_sim_time': True}]),
@@ -512,6 +536,13 @@ def generate_launch_description():
         DeclareLaunchArgument('lidar', default_value='true',
                               description='LDS-01 2D lidar + lidar_loc wall localizer '
                                           '(/lidar/odom_kf) for the room scan.'),
+        DeclareLaunchArgument('window_scale', default_value='1.0',
+                              description='Blue opening size x this (measured 0.60 m). '
+                                          'It is moved to stay inside the 2.5 m wall.'),
+        DeclareLaunchArgument('lidar_yaw_source', default_value='imu',
+                              description='wall_localizer yaw_source (auto|imu|windows|boot|fixed).'),
+        DeclareLaunchArgument('lidar_seed_yaw', default_value='1.5708',
+                              description='EKF2 heading of arena +X (east), rad, for yaw_source imu.'),
         DeclareLaunchArgument('light_scale', default_value='0.5',
                               description='Multiplier on every light in the world '
                                           '(1 = as authored). The dark room is dim.'),
