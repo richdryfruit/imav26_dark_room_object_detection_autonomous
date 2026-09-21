@@ -3,11 +3,18 @@ PX4 SITL + Gazebo (gz sim 8) for mission_fsm_part1/2, on a laptop.
 
     ros2 launch drone_testing sitl.launch.py sitl_src:=<imav_indoor_2026_sitl checkout>
 
-World: imav2026_scaled, the real arena x2.2 (the only world with every sensor
-plugin PX4 needs -- baro, mag, navsat, flow). In it:
-    takeoff pad   id 0   (-4.4, -14.3)     <- default spawn
-    window marker id 2   (-4.4,   7.15)    21.45 m ahead, 0.88 m marker
-    window centre        (-5.83,  9.856, z 3.85), 1.2 x 1.2 m
+World: imav2026_indoor_v9, REAL scale. It ships without the sensor systems
+PX4 needs (baro, mag, navsat, optical flow) and without a geographic origin,
+so the launch writes a patched copy to /tmp and loads that. In it:
+    takeoff pad   id 0   (-2.0, -6.5)      <- default spawn (part 1)
+    window marker id 2   (-2.0,  3.25)     9.75 m ahead, 0.40 m marker
+                                           <- part 2 spawn: y:=3.25
+    blue window          centre (-2.65, 4.48, z 1.75), 0.5 x 0.5 m aperture:
+                         0.65 m LEFT of the marker, 1.23 m beyond it
+    dark room            2.5 x 2.5 x 2.5 m, south wall y 4.5
+
+world:=imav2026_scaled still works (x2.2, window at 3.85 m -- too high for
+part 2's 1.9 m flight; pass x:=-4.4 y:=-14.3 marker_size:=0.88).
 
 Starts: gz sim on the imav_indoor_2026 world, the x500 with a down camera,
 PX4 SITL (standalone, attaches to the spawned model), the uXRCE-DDS agent
@@ -33,9 +40,46 @@ from launch import LaunchDescription
 from launch.actions import (AppendEnvironmentVariable, DeclareLaunchArgument,
                             ExecuteProcess, IncludeLaunchDescription,
                             OpaqueFunction, TimerAction)
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+
+# Systems PX4's gz_bridge needs sensor data from, and the origin navsat needs.
+_WORLD_SYSTEMS = [
+    ('gz-sim-air-pressure-system', 'gz::sim::systems::AirPressure'),
+    ('gz-sim-magnetometer-system', 'gz::sim::systems::Magnetometer'),
+    ('gz-sim-navsat-system', 'gz::sim::systems::NavSat'),
+    ('gz-sim-imu-system', 'gz::sim::systems::Imu'),
+    ('libOpticalFlowSystem.so', 'custom::OpticalFlowSystem'),
+]
+_ORIGIN = ('<spherical_coordinates><surface_model>EARTH_WGS84</surface_model>'
+           '<latitude_deg>47.397742</latitude_deg><longitude_deg>8.545594'
+           '</longitude_deg><elevation>488.0</elevation><heading_deg>0'
+           '</heading_deg></spherical_coordinates>')
+
+
+def _patched_world(path):
+    """Copy the world to /tmp with any missing PX4 sensor systems added.
+
+    A world that already has them all (imav2026_scaled) is returned as is.
+    """
+    import re
+    with open(path) as f:
+        sdf = f.read()
+    add = [f'<plugin filename="{fn}" name="{name}"/>'
+           for fn, name in _WORLD_SYSTEMS if fn not in sdf]
+    if 'spherical_coordinates' not in sdf:
+        add.insert(0, _ORIGIN)
+    if not add:
+        return path
+    m = re.search(r'<world[^>]*>', sdf)
+    sdf = sdf[:m.end()] + '\n' + '\n'.join(add) + '\n' + sdf[m.end():]
+    out = os.path.join('/tmp', os.path.basename(path).replace('.sdf.world', '_px4.sdf'))
+    with open(out, 'w') as f:
+        f.write(sdf)
+    return out
 
 
 def _setup(context):
@@ -43,7 +87,8 @@ def _setup(context):
     sitl_src = os.path.expanduser(arg('sitl_src'))
     px4_dir = os.path.expanduser(arg('px4_dir'))
     world_name = arg('world')
-    world_file = os.path.join(sitl_src, 'world', world_name + '.sdf.world')
+    world_file = _patched_world(
+        os.path.join(sitl_src, 'world', world_name + '.sdf.world'))
     share = get_package_share_directory('drone_testing')
     urdf = xacro.process_file(
         os.path.join(share, 'sim', 'sim_drone.urdf.xacro')).toxml()
@@ -93,6 +138,17 @@ def _setup(context):
                       '[gz.msgs.CameraInfo',
                       '/camera/depth/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
                       '/lidar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+                      '/front_cam/image@sensor_msgs/msg/Image[gz.msgs.Image',
+                      '/front_cam/depth_image@sensor_msgs/msg/Image[gz.msgs.Image',
+                      '/front_cam/camera_info@sensor_msgs/msg/CameraInfo'
+                      '[gz.msgs.CameraInfo',
+                  ],
+                  # The RealSense names every consumer already uses.
+                  remappings=[
+                      ('/front_cam/image', '/camera/camera/color/image_raw'),
+                      ('/front_cam/depth_image',
+                       '/camera/camera/aligned_depth_to_color/image_raw'),
+                      ('/front_cam/camera_info', '/camera/camera/color/camera_info'),
                   ])
     # Flow for x/y, GPS off; arm with no RC/GCS. Height ref is BARO with the
     # rangefinder CONDITIONAL: EKF2 only starts flow fusion with a valid
@@ -182,7 +238,18 @@ def _setup(context):
                               'marker_size': float(arg('marker_size')),
                               'aruco_dict': arg('aruco_dict'),
                               'stream_port': 8080}])
-    return env + [gazebo, rsp, spawn, bridge,
+    window = Node(package='drone_testing', executable='window_detect',
+                  name='window_detect', output='screen',
+                  parameters=[{
+                      'image_topic': '/camera/camera/color/image_raw',
+                      'depth_topic': '/camera/camera/aligned_depth_to_color/image_raw',
+                      'camera_info_topic': '/camera/camera/color/camera_info',
+                      'publish_geometry': True,
+                      'color': 'blue',
+                      'stream_port': 8081,
+                  }],
+                  condition=IfCondition(arg('window_detect')))
+    return env + [gazebo, rsp, spawn, bridge, TimerAction(period=6.0, actions=[window]),
                   TimerAction(period=8.0, actions=[px4]),
                   TimerAction(period=20.0, actions=[px4_params]),
                   agent, TimerAction(period=5.0, actions=[aruco])]
@@ -195,12 +262,15 @@ def generate_launch_description():
                               description='Source checkout of imav_indoor_2026_sitl '
                                           '(the worlds and models are not installed).'),
         DeclareLaunchArgument('px4_dir', default_value='~/PX4-Autopilot'),
-        DeclareLaunchArgument('world', default_value='imav2026_scaled'),
-        DeclareLaunchArgument('x', default_value='-4.4'),
-        DeclareLaunchArgument('y', default_value='-14.3'),
+        DeclareLaunchArgument('world', default_value='imav2026_indoor_v9'),
+        DeclareLaunchArgument('x', default_value='-2.0'),
+        DeclareLaunchArgument('y', default_value='-6.5'),
         DeclareLaunchArgument('yaw', default_value='1.5708'),
         DeclareLaunchArgument('marker_id', default_value='2'),
-        DeclareLaunchArgument('marker_size', default_value='0.88',
+        DeclareLaunchArgument('window_detect', default_value='true',
+                              description='Start window_detect on the sim front camera '
+                                          '(part 2). Browser view on :8081.'),
+        DeclareLaunchArgument('marker_size', default_value='0.40',
                               description='Edge of the printed marker in the '
                                           'sim world, not the real 0.80.'),
         DeclareLaunchArgument('aruco_dict', default_value='DICT_5X5_50'),

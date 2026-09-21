@@ -25,4 +25,28 @@
       </camera>
     </sensor>
   </gazebo>
+
+  <!-- Front RealSense D435i stand-in: colour + depth from one rgbd_camera, so
+       depth is pixel-aligned to colour exactly like aligned_depth_to_color.
+       Mounted where the launch files put the real one (cam_x 0.105, cam_z -0.04). -->
+  <joint name="front_cam_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="front_cam_link"/>
+    <origin xyz="0.105 0 -0.04" rpy="0 0 0"/>
+  </joint>
+  <link name="front_cam_link">
+    <inertial><mass value="0.01"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/></inertial>
+  </link>
+  <gazebo reference="front_cam_link">
+    <sensor name="front_cam" type="rgbd_camera">
+      <topic>front_cam</topic>
+      <update_rate>15</update_rate>
+      <camera>
+        <horizontal_fov>1.204</horizontal_fov>
+        <image><width>640</width><height>480</height><format>R8G8B8</format></image>
+        <clip><near>0.1</near><far>10</far></clip>
+      </camera>
+    </sensor>
+  </gazebo>
 </robot>
