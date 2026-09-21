@@ -275,7 +275,7 @@ def _real_course(sdf, models_dir, out_dir, scale=1.0):
     return sdf.replace('</world>', '\n'.join(extra) + '\n</world>')
 
 
-def _speckle_png(path, size=1024, seed=7):
+def _speckle_png(path, width=1024, height=1024, seed=7, per_mpx=6700):
     """A grey floor with random dark/light speckles, as a PNG (no deps).
 
     The real dark-room floor is speckled, which is what lets the PMW3901 see
@@ -288,22 +288,24 @@ def _speckle_png(path, size=1024, seed=7):
     if os.path.exists(path):
         return path
     rnd = random.Random(seed)
-    img = bytearray([150]) * (size * size)
-    for _ in range(9000):
-        cx, cy = rnd.randrange(size), rnd.randrange(size)
+    img = bytearray([150]) * (width * height)
+    # per_mpx speckles per 1024x1024 of texture (was 9000: a little lighter).
+    for _ in range(int(per_mpx * width * height / (1024 * 1024))):
+        cx, cy = rnd.randrange(width), rnd.randrange(height)
         r = rnd.randint(2, 7)
         v = rnd.choice((30, 60, 90, 200, 235))
-        for y in range(max(0, cy - r), min(size, cy + r + 1)):
-            for x in range(max(0, cx - r), min(size, cx + r + 1)):
+        for y in range(max(0, cy - r), min(height, cy + r + 1)):
+            for x in range(max(0, cx - r), min(width, cx + r + 1)):
                 if (x - cx) ** 2 + (y - cy) ** 2 <= r * r:
-                    img[y * size + x] = v
-    raw = b''.join(b'\x00' + bytes(img[y * size:(y + 1) * size]) for y in range(size))
+                    img[y * width + x] = v
+    raw = b''.join(b'\x00' + bytes(img[y * width:(y + 1) * width])
+                   for y in range(height))
 
     def chunk(kind, data):
         c = struct.pack('>I', len(data)) + kind + data
         return c + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
     png = (b'\x89PNG\r\n\x1a\n'
-           + chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 0, 0, 0, 0))
+           + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 0, 0, 0, 0))
            + chunk(b'IDAT', zlib.compress(raw, 6)) + chunk(b'IEND', b''))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'wb') as f:
@@ -311,15 +313,20 @@ def _speckle_png(path, size=1024, seed=7):
     return path
 
 
-def _speckle_room_floor(sdf):
-    """Put the speckle texture on the dark room's floor."""
+def _speckle_floors(sdf):
+    """Speckle the dark room floor and the arena floor outside it."""
     import re
-    tex = _speckle_png(os.path.join(_SIM_MODELS, 'speckle_floor.png'))
-    mat = ('<material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse>'
-           f'<pbr><metal><albedo_map>{tex}</albedo_map><roughness>0.9</roughness>'
-           '<metalness>0.0</metalness></metal></pbr></material>')
-    return re.sub(r'(<model name="room_floor">.*?<visual[^>]*>.*?)<material>.*?</material>',
-                  lambda m: m.group(1) + mat, sdf, count=1, flags=re.S)
+    room = _speckle_png(os.path.join(_SIM_MODELS, 'speckle_room_v2.png'))
+    # The arena is 15.4 x 30.8 m: a 1:2 texture keeps the speckles round.
+    arena = _speckle_png(os.path.join(_SIM_MODELS, 'speckle_arena_v2.png'),
+                         1024, 2048, seed=11)
+    for name, tex in (('room_floor', room), ('arena_floor', arena)):
+        mat = ('<material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse>'
+               f'<pbr><metal><albedo_map>{tex}</albedo_map><roughness>0.9'
+               '</roughness><metalness>0.0</metalness></metal></pbr></material>')
+        sdf = re.sub(rf'(<model name="{name}">.*?<visual[^>]*>.*?)<material>.*?</material>',
+                     lambda m, mat=mat: m.group(1) + mat, sdf, count=1, flags=re.S)
+    return sdf
 
 
 def _patched_world(path, light_scale=1.0, window_scale=1.0):
@@ -339,8 +346,8 @@ def _patched_world(path, light_scale=1.0, window_scale=1.0):
     scaled = os.path.basename(path).startswith('imav2026_scaled')
     if not add and abs(light_scale - 1.0) < 1e-6 and not course and not scaled:
         return path
-    if course or scaled:
-        sdf = _speckle_room_floor(sdf)
+    if scaled:
+        sdf = _speckle_floors(sdf)
     if scaled:
         sdf = _replace_dolls(sdf, os.path.join(os.path.dirname(path), 'models'),
                              _SIM_MODELS, _DOLLS_SCALED, 10)
