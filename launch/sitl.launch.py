@@ -461,6 +461,11 @@ def _setup(context):
         # to land -- inside the room. Above 0.5 m: baro height, the range
         # only tracks terrain, which is what a sill is.
         'EKF2_RNG_A_HMAX': 0.5,
+        # No baro auto-calibration to GPS altitude. With it on, the sim GPS's
+        # 488 m elevation was applied as a 5.7 kPa (~480 m) step offset
+        # (CAL_BARO0_OFF) -- GPS fused or not -- and EKF2 faulted the baro
+        # (cs_baro_fault). That was behind every "baro fault" today.
+        'SENS_BAR_AUTOCAL': 0,
     }
     env_params = ' '.join(f'PX4_PARAM_{k}={v}' for k, v in params.items())
     set_params = '; '.join(f'bin/px4-param set {k} {v}' for k, v in params.items())
