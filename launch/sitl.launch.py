@@ -114,8 +114,8 @@ def _setup(context):
         cmd=['bash', '-c',
              f'cd {px4_dir}/build/px4_sitl_default && {set_params}; '
              'echo "SITL PARAMS SET: flow x/y, range height, GPS off"; '
-             'ls ' + plugins + '/*/libOpticalFlowSystem.so '
-             + plugins + '/libOpticalFlowSystem.so 2>/dev/null '
+             f'find {plugins} -name libOpticalFlowSystem.so | grep -q . '
+             '&& echo "optical flow plugin: found" '
              '|| echo "WARNING: libOpticalFlowSystem.so NOT BUILT -- no optical '
              'flow. sudo apt install libopencv-dev, then make px4_sitl again."'],
         output='screen')
