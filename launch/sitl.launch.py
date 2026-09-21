@@ -121,6 +121,14 @@ def _setup(context):
         # only (read at ekf2 start), hence the PX4_PARAM_* route.
         'EKF2_MULTI_IMU': 0, 'SENS_IMU_MODE': 1,
         'EKF2_MULTI_MAG': 0, 'SENS_MAG_MODE': 1,
+        # No external vision. The SITL model publishes Gazebo odometry, which
+        # PX4's gz_bridge forwards as vehicle_visual_odometry in a different
+        # frame (ev_hpos test ratio ~787). Whenever EKF2 tried to start on it
+        # it reset position/heading to it -- the 2 m / 147 deg jump at arming
+        # and the flapping local_position_invalid. Flow is the only x/y here.
+        'EKF2_EV_CTRL': 0,
+        # No power module in SITL ("system power unavailable").
+        'CBRK_SUPPLY_CHK': 894281,
     }
     env_params = ' '.join(f'PX4_PARAM_{k}={v}' for k, v in params.items())
     set_params = '; '.join(f'bin/px4-param set {k} {v}' for k, v in params.items())
@@ -134,7 +142,7 @@ def _setup(context):
     px4_params = ExecuteProcess(
         cmd=['bash', '-c',
              f'cd {px4_dir}/build/px4_sitl_default && {set_params}; '
-             'echo "SITL PARAMS SET: flow x/y, rangefinder height, no baro, no GPS, no RC"; '
+             'echo "SITL PARAMS SET: flow x/y, rangefinder height, no baro, no GPS, no EV, no RC"; '
              # One-shot health report after EKF2 has had time to settle, so a
              # refused arm or a flapping position is explained in this log.
              'sleep 15; echo "===== SITL HEALTH REPORT ====="; '
