@@ -82,3 +82,45 @@ def test_relock_mode_keeps_the_inherited_camera_relock(fsm):
     fsm.EXIT_MODE = 'relock'
     fsm._begin_relock()
     assert fsm.current_stage == fsm.RELOCK
+
+
+class _Msg:
+    def __init__(self):
+        self.position = [1.0, 2.0, -1.75]
+        self.velocity = [float('nan')] * 3
+
+
+def test_wall_crossing_flies_z_on_velocity_then_reanchors(fsm):
+    sent = []
+    fsm._publish_sp_raw = sent.append
+    fsm._enter_stage(fsm.TRAVERSE)
+    fsm._update_crossing()
+    assert fsm._crossing
+    m = _Msg()
+    fsm._publish_sp(m)
+    assert m.position[2] != m.position[2]          # NaN: z not position-held
+    assert m.velocity[2] == 0.0
+    assert m.position[:2] == [1.0, 2.0]            # x/y untouched
+    # a height blip mid-crossing gets the wide grace, not an instant landing
+    assert fsm.HEIGHT_INVALID_GRACE < fsm.CROSSING_GRACE
+    # past the wall: needs crossing_settle_s of valid height, then re-anchors
+    fsm._enter_stage(fsm.CLEAR)
+    fsm.local_position.z = -1.42
+    fsm._update_crossing()
+    assert fsm._crossing
+    fsm._crossing_valid_since = time.monotonic() - 10
+    fsm._update_crossing()
+    assert not fsm._crossing
+    assert fsm.target_z == pytest.approx(-1.42)
+    m2 = _Msg()
+    fsm._publish_sp(m2)
+    assert m2.position[2] == -1.75                 # normal again
+
+
+def test_a_landing_during_a_crossing_releases_the_hold(fsm):
+    fsm._enter_stage(fsm.TRAVERSE)
+    fsm._update_crossing()
+    assert fsm._crossing
+    fsm._enter_stage(fsm.LANDING)
+    fsm._update_crossing()
+    assert not fsm._crossing

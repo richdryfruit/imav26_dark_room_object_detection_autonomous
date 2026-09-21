@@ -116,6 +116,27 @@ class MissionFSMPart2(MissionFSM):
                 f"exit_mode must be 'retrace' or 'relock'; got '{self.EXIT_MODE}'.")
         self.inbound_z = None           # target_z of the inbound traverse
 
+        # ---- crossing the wall on the TFmini alone ----------------------
+        # The only height source is the downward rangefinder. For the
+        # instant it reads the window SILL instead of the floor, EKF2 resets
+        # its height, and a position setpoint on z then chases a height that
+        # is wrong by metres (seen in SITL: a stall in the aperture, then a
+        # climb to "6 m" in a 5.5 m room). So while crossing -- the inbound
+        # TRAVERSE and the 'exit' leg -- z is flown on VELOCITY (hold 0), the
+        # height-invalid grace is widened, and position control on z resumes
+        # only once the height has been valid again for crossing_settle_s,
+        # re-anchored where the aircraft actually is.
+        self.CROSSING_VZ_HOLD = bool(self.declare_parameter(
+            'crossing_vz_hold', True).value)
+        self.CROSSING_GRACE = float(self._declare_number(
+            'crossing_height_grace', 5.0))
+        self.CROSSING_SETTLE = float(self._declare_number(
+            'crossing_settle_s', 1.0))
+        self._crossing = False
+        self._crossing_valid_since = None
+        self._publish_sp_raw = self.trajectory_setpoint_pub.publish
+        self.trajectory_setpoint_pub.publish = self._publish_sp
+
         # Both strafes are always in the plan, even at window_offset 0: a
         # zero-length pure-distance leg just settles for leg_settle_seconds,
         # and MissionFSM._handle_clear hands over to 'offset_back' by name.
@@ -185,6 +206,76 @@ class MissionFSMPart2(MissionFSM):
         self.get_logger().warning(
             f"ROOM DONE. DOLLS COUNTED: {self._doll_words()}.")
         super()._finish_tile_scan(outcome)
+
+    # ------------------------------------------------ crossing the wall
+
+    def _crossing_now(self):
+        """True while the rangefinder may be looking at the sill."""
+        if not self.CROSSING_VZ_HOLD:
+            return False
+        if self.current_stage == self.TRAVERSE:
+            return True
+        leg = self.current_leg()
+        return (leg is not None and leg.name == 'exit'
+                and self.current_stage == self.CRUISE)
+
+    def _update_crossing(self):
+        lp = self.local_position
+        if self.current_stage in (self.LANDING, self.DISARMING, self.KILLING,
+                                  self.DONE):
+            # A landing owns z (its own descent logic); never hold it at 0.
+            self._crossing = False
+            self._crossing_valid_since = None
+            return
+        if self._crossing_now():
+            if not self._crossing:
+                self._crossing = True
+                self.get_logger().warning(
+                    "CROSSING the wall: altitude on vertical velocity (hold 0) "
+                    f"and a {self.CROSSING_GRACE:.1f} s height grace until the "
+                    "rangefinder sees the floor again.")
+            self._crossing_valid_since = None
+            return
+        if not self._crossing:
+            return
+        # Past the wall. Stay on velocity until the height has been valid for
+        # crossing_settle_s, then re-anchor z where the aircraft actually is.
+        if lp is None or not lp.z_valid:
+            self._crossing_valid_since = None
+            return
+        now = time.monotonic()
+        if self._crossing_valid_since is None:
+            self._crossing_valid_since = now
+            return
+        if now - self._crossing_valid_since < self.CROSSING_SETTLE:
+            return
+        self._crossing = False
+        self._crossing_valid_since = None
+        self.setpoint_z = float(lp.z)
+        self.target_z = float(lp.z)
+        self.get_logger().warning(
+            f"CROSSED: height valid again ({self.relative_altitude() or 0.0:.2f} m); "
+            "altitude back on position, held where it is.")
+
+    def _publish_sp(self, msg):
+        if self._crossing:
+            msg.position[2] = float('nan')
+            msg.velocity[2] = 0.0
+        self._publish_sp_raw(msg)
+
+    def timer_callback(self):
+        self._update_crossing()
+        super().timer_callback()
+
+    def _still_flyable(self):
+        if not self._crossing:
+            return super()._still_flyable()
+        normal = self.HEIGHT_INVALID_GRACE
+        self.HEIGHT_INVALID_GRACE = max(normal, self.CROSSING_GRACE)
+        try:
+            return super()._still_flyable()
+        finally:
+            self.HEIGHT_INVALID_GRACE = normal
 
     # ------------------------------------------------------------ the way out
 
