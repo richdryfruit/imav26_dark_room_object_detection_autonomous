@@ -16,8 +16,9 @@ The flight node is run by hand in a second terminal, as on the real drone.
 
 SENSORS AND ESTIMATOR, matched to the aircraft rather than PX4's SITL default:
     x/y     PMW3901 optical flow (the sim flow camera is its 42 deg FOV)
-    height  TFmini Plus: the sim's single-beam lidar clipped to 0.1-12 m,
-            with 2 cm of noise (a noiseless range on the pad reads "stuck")
+    height  baro reference + TFmini Plus (conditional): the sim's single-beam
+            lidar clipped to 0.1-12 m, 2 cm noise. Range as the height REF
+            stops EKF2 ever starting flow fusion -- see params below.
     GPS     simulated but NOT fused (EKF2_GPS_CTRL 0)
 
 Gazebo's yaw 0 is +X; the course runs along +Y, hence yaw 1.5708 (facing
@@ -93,12 +94,17 @@ def _setup(context):
                       '/camera/depth/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
                       '/lidar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
                   ])
-    # Flow for x/y, rangefinder for height, GPS off; arm with no RC/GCS.
+    # Flow for x/y, GPS off; arm with no RC/GCS. Height ref is BARO with the
+    # rangefinder CONDITIONAL: EKF2 only starts flow fusion with a valid
+    # terrain estimate, and with the rangefinder as the height reference
+    # (HGT_REF 2) terrain is never estimated -- flow never starts, local
+    # position goes invalid at arming and PX4 disarms. This is PX4's
+    # recommended flow setup; the rangefinder still gives height above ground.
     # Set twice: as PX4_PARAM_* (read by rcS at boot on PX4 >= 1.14) and
     # again with px4-param once it is up, for builds that ignore the env.
     params = {
-        'EKF2_GPS_CTRL': 0, 'EKF2_OF_CTRL': 1, 'EKF2_RNG_CTRL': 2,
-        'EKF2_HGT_REF': 2, 'EKF2_MIN_RNG': 0.1, 'COM_ARM_WO_GPS': 1,
+        'EKF2_GPS_CTRL': 0, 'EKF2_OF_CTRL': 1, 'EKF2_RNG_CTRL': 1,
+        'EKF2_HGT_REF': 1, 'EKF2_MIN_RNG': 0.1, 'COM_ARM_WO_GPS': 1,
         'NAV_RCL_ACT': 0, 'NAV_DLL_ACT': 0, 'COM_RCL_EXCEPT': 4,
     }
     env_params = ' '.join(f'PX4_PARAM_{k}={v}' for k, v in params.items())
@@ -113,7 +119,7 @@ def _setup(context):
     px4_params = ExecuteProcess(
         cmd=['bash', '-c',
              f'cd {px4_dir}/build/px4_sitl_default && {set_params}; '
-             'echo "SITL PARAMS SET: flow x/y, range height, GPS off"; '
+             'echo "SITL PARAMS SET: flow x/y, baro+range height, GPS off"; '
              f'find {plugins} -name libOpticalFlowSystem.so | grep -q . '
              '&& echo "optical flow plugin: found" '
              '|| echo "WARNING: libOpticalFlowSystem.so NOT BUILT -- no optical '
