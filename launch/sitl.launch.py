@@ -106,6 +106,14 @@ def _setup(context):
         'EKF2_GPS_CTRL': 0, 'EKF2_OF_CTRL': 1, 'EKF2_RNG_CTRL': 1,
         'EKF2_HGT_REF': 1, 'EKF2_MIN_RNG': 0.1, 'COM_ARM_WO_GPS': 1,
         'NAV_RCL_ACT': 0, 'NAV_DLL_ACT': 0, 'COM_RCL_EXCEPT': 4,
+        # No barometer, as on the aircraft (lidar = height). The sim baro is
+        # flagged faulty on the pad ("height estimate not stable", arming
+        # denied); with it off EKF2 falls back to the rangefinder for height
+        # and still estimates terrain from it, which is what flow needs.
+        'EKF2_BARO_CTRL': 0,
+        # No RC in SITL: without this PX4 raises manual_control_signal_lost
+        # and drops out of Offboard into Hold.
+        'COM_RC_IN_MODE': 4,
     }
     env_params = ' '.join(f'PX4_PARAM_{k}={v}' for k, v in params.items())
     set_params = '; '.join(f'bin/px4-param set {k} {v}' for k, v in params.items())
@@ -119,7 +127,7 @@ def _setup(context):
     px4_params = ExecuteProcess(
         cmd=['bash', '-c',
              f'cd {px4_dir}/build/px4_sitl_default && {set_params}; '
-             'echo "SITL PARAMS SET: flow x/y, baro+range height, GPS off"; '
+             'echo "SITL PARAMS SET: flow x/y, rangefinder height, no baro, no GPS, no RC"; '
              f'find {plugins} -name libOpticalFlowSystem.so | grep -q . '
              '&& echo "optical flow plugin: found" '
              '|| echo "WARNING: libOpticalFlowSystem.so NOT BUILT -- no optical '
