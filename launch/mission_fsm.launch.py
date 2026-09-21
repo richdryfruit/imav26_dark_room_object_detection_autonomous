@@ -155,6 +155,7 @@ def generate_launch_description():
                 emulate_tty=True,
                 parameters=[{
                     'camera_index': LaunchConfiguration('pad_camera_index'),
+                    'camera_device': LaunchConfiguration('pad_camera_device'),
                     'width': LaunchConfiguration('pad_width'),
                     'height': LaunchConfiguration('pad_height'),
                     'fourcc': LaunchConfiguration('pad_fourcc'),
@@ -205,7 +206,7 @@ def generate_launch_description():
         actions=[
             Node(
                 package='drone_testing',
-                executable='mission_fsm',
+                executable=LaunchConfiguration('fsm_executable'),
                 name='mission_fsm',
                 output='screen',
                 emulate_tty=True,
@@ -402,6 +403,12 @@ def generate_launch_description():
             description='Start the support stack but not the flight node, so '
                         'it can be run by hand and keep the q/k keyboard '
                         'aborts. false = fly the whole mission from here.'),
+        DeclareLaunchArgument(
+            'fsm_executable', default_value='mission_fsm',
+            description='Which flight node agent_only:=false starts: '
+                        'mission_fsm (the whole run), or mission_fsm_part1 / '
+                        'mission_fsm_part2 (the run split in two -- use their '
+                        'own launch files, which set this and their defaults).'),
 
         # ---- THE LATERAL ESTIMATE ----
         #
@@ -774,7 +781,15 @@ def generate_launch_description():
         # `pad_` prefixed throughout: the bare names collide with the
         # RealSense arguments in the include, and a forwarded name would land
         # in both cameras at once.
-        DeclareLaunchArgument('pad_camera_index', default_value='0',
+        DeclareLaunchArgument(
+            'pad_camera_device',
+            default_value='/dev/v4l/by-id/usb-046d_0823_1469ADD0-video-index0',
+            description='The down camera (Logitech B910) by SERIAL NUMBER. Wins '
+                        'over pad_camera_index. /dev/videoN moves with plug order '
+                        'and the RealSense takes video0-5, so an index opens a '
+                        'RealSense node and can steal it from the RealSense '
+                        'driver. Empty = fall back to the index.'),
+        DeclareLaunchArgument('pad_camera_index', default_value='1',
                               description='cv2.VideoCapture index of the '
                                           'down-facing camera.'),
         DeclareLaunchArgument('pad_width', default_value='800',

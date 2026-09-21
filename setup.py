@@ -54,6 +54,8 @@ setup(
             'ring_grab = drone_testing.ring_grab:main',
             'precision_land = drone_testing.precision_land:main',
             'mission_fsm = drone_testing.mission_fsm:main',
+            'mission_fsm_part1 = drone_testing.mission_fsm_part1:main',
+            'mission_fsm_part2 = drone_testing.mission_fsm_part2:main',
             'doll_report_text = drone_testing.doll_report_text:main',
         ],
     },
