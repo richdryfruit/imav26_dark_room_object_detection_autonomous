@@ -411,6 +411,10 @@ class OffboardSequence(Node):
             'climb_speed', self.CLIMB_SPEED))
         self.LAND_SPEED = float(self._declare_number(
             'land_speed', self.LAND_SPEED))
+        # s to reach and settle at the takeoff altitude. Raise it in SITL,
+        # which can run well below real time.
+        self.TAKEOFF_TIMEOUT = float(self._declare_number(
+            'takeoff_timeout', self.TAKEOFF_TIMEOUT))
         # SITL ONLY. A simulated rangefinder on the pad reads a perfectly
         # constant value, EKF2 flags it stuck and stops fusing it -- which a
         # real, noisy sensor never does. false skips the EKF2 rangefinder-fusion

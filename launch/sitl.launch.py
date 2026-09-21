@@ -14,6 +14,12 @@ PX4 SITL (standalone, attaches to the spawned model), the uXRCE-DDS agent
 (UDP 8888), the ROS<->gz bridge and aruco_pose reading the sim down camera.
 The flight node is run by hand in a second terminal, as on the real drone.
 
+SENSORS AND ESTIMATOR, matched to the aircraft rather than PX4's SITL default:
+    x/y     PMW3901 optical flow (the sim flow camera is its 42 deg FOV)
+    height  TFmini Plus: the sim's single-beam lidar clipped to 0.1-12 m,
+            with 2 cm of noise (a noiseless range on the pad reads "stuck")
+    GPS     simulated but NOT fused (EKF2_GPS_CTRL 0)
+
 Gazebo's yaw 0 is +X; the course runs along +Y, hence yaw 1.5708 (facing
 the window marker from the takeoff pad).
 """
@@ -40,15 +46,30 @@ def _setup(context):
     share = get_package_share_directory('drone_testing')
     urdf = xacro.process_file(
         os.path.join(share, 'sim', 'sim_drone.urdf.xacro')).toxml()
+    # TFmini Plus: 0.1-12 m, ~2 cm noise. The only <max>100.0</max> in the
+    # model is the downward lidar's range; the noise goes right after it.
+    i = urdf.find('<max>100.0</max>')
+    j = urdf.find('</range>', i)
+    if i > 0 and j > 0:
+        j += len('</range>')
+        urdf = (urdf[:i] + '<max>12.0</max>' + urdf[i + len('<max>100.0</max>'):j]
+                + '<noise><type>gaussian</type><mean>0</mean>'
+                  '<stddev>0.02</stddev></noise>' + urdf[j:])
+
+    plugins = os.path.join(px4_dir, 'build', 'px4_sitl_default', 'src',
+                           'modules', 'simulation', 'gz_plugins')
+    plugin_dirs = [plugins] + sorted(
+        os.path.join(plugins, d) for d in (os.listdir(plugins)
+                                           if os.path.isdir(plugins) else [])
+        if os.path.isdir(os.path.join(plugins, d)))
 
     env = [
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', ':'.join([
             os.path.dirname(get_package_share_directory('imav_indoor_2026')),
             os.path.join(sitl_src, 'world'),
             os.path.join(sitl_src, 'world', 'models')])),
-        AppendEnvironmentVariable('GZ_SIM_SYSTEM_PLUGIN_PATH', os.path.join(
-            px4_dir, 'build', 'px4_sitl_default', 'src', 'modules',
-            'simulation', 'gz_plugins')),
+        AppendEnvironmentVariable('GZ_SIM_SYSTEM_PLUGIN_PATH',
+                                  ':'.join(plugin_dirs)),
     ]
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
@@ -72,12 +93,31 @@ def _setup(context):
                       '/camera/depth/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
                       '/lidar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
                   ])
+    # Flow for x/y, rangefinder for height, GPS off; arm with no RC/GCS.
+    # Set twice: as PX4_PARAM_* (read by rcS at boot on PX4 >= 1.14) and
+    # again with px4-param once it is up, for builds that ignore the env.
+    params = {
+        'EKF2_GPS_CTRL': 0, 'EKF2_OF_CTRL': 1, 'EKF2_RNG_CTRL': 2,
+        'EKF2_HGT_REF': 2, 'EKF2_MIN_RNG': 0.1, 'COM_ARM_WO_GPS': 1,
+        'NAV_RCL_ACT': 0, 'NAV_DLL_ACT': 0, 'COM_RCL_EXCEPT': 4,
+    }
+    env_params = ' '.join(f'PX4_PARAM_{k}={v}' for k, v in params.items())
+    set_params = '; '.join(f'bin/px4-param set {k} {v}' for k, v in params.items())
     px4 = ExecuteProcess(
         cmd=['bash', '-c',
              f'cd {px4_dir} && rm -f build/px4_sitl_default/rootfs/*.bson && '
-             f'PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 '
+             f'{env_params} PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 '
              f'PX4_GZ_MODEL_NAME=x500_drone PX4_GZ_WORLD={world_name} '
              'build/px4_sitl_default/bin/px4 -d'],
+        output='screen')
+    px4_params = ExecuteProcess(
+        cmd=['bash', '-c',
+             f'cd {px4_dir}/build/px4_sitl_default && {set_params}; '
+             'echo "SITL PARAMS SET: flow x/y, range height, GPS off"; '
+             'ls ' + plugins + '/*/libOpticalFlowSystem.so '
+             + plugins + '/libOpticalFlowSystem.so 2>/dev/null '
+             '|| echo "WARNING: libOpticalFlowSystem.so NOT BUILT -- no optical '
+             'flow. sudo apt install libopencv-dev, then make px4_sitl again."'],
         output='screen')
     agent = ExecuteProcess(cmd=['MicroXRCEAgent', 'udp4', '-p', '8888'],
                            output='screen')
@@ -93,6 +133,7 @@ def _setup(context):
                               'stream_port': 8080}])
     return env + [gazebo, rsp, spawn, bridge,
                   TimerAction(period=8.0, actions=[px4]),
+                  TimerAction(period=20.0, actions=[px4_params]),
                   agent, TimerAction(period=5.0, actions=[aruco])]
 
 
