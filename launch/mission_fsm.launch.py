@@ -324,6 +324,7 @@ def generate_launch_description():
                     'tiles_x': LaunchConfiguration('tiles_x'),
                     'tiles_y': LaunchConfiguration('tiles_y'),
                     'order': LaunchConfiguration('tile_order'),
+                    'room_scan_sequence': LaunchConfiguration('room_scan_sequence'),
                     'dwell_s': LaunchConfiguration('tile_dwell_s'),
                     'arrive_eps': LaunchConfiguration('tile_arrive_eps'),
                     'settle_s': LaunchConfiguration('tile_settle_s'),
@@ -465,10 +466,21 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'y_axis', default_value='left',
             description='left | right of the front wall, for arena +Y.'),
-        DeclareLaunchArgument('lidar_room_x', default_value='5.41',
+        DeclareLaunchArgument('lidar_room_x', default_value='2.50',
                               description='m. Nominal only -- the localizer '
                                           'measures the real thing every scan.'),
-        DeclareLaunchArgument('lidar_room_y', default_value='5.41'),
+        DeclareLaunchArgument('lidar_room_y', default_value='2.50'),
+        DeclareLaunchArgument(
+            'room_scan_sequence',
+            default_value='forward 0.8, right 0.8, backward 0.8, left 0.8, yaw 180',
+            description='The in-room pattern as RELATIVE moves in the body frame '
+                        'the aircraft entered on (forward = the way it flew in). '
+                        'Flown on the lidar wall fix, so it does not drift. Every '
+                        'point is clamped tile_wall_margin off the walls -- in a '
+                        '2.5 m room that is what stops a move from planning past '
+                        'a wall if the window is not centred. The trailing yaw is '
+                        'performed as the closing half turn that faces the window '
+                        'for the relock. Pass your own on the day.'),
         DeclareLaunchArgument('tiles_x', default_value='2'),
         DeclareLaunchArgument('tiles_y', default_value='2',
                               description='2x2 is the competition pattern; '
@@ -489,12 +501,12 @@ def generate_launch_description():
         DeclareLaunchArgument('tile_speed', default_value='0.35'),
         DeclareLaunchArgument('tile_move_timeout', default_value='25.0'),
         DeclareLaunchArgument(
-            'tile_wall_margin', default_value='0.90',
+            'tile_wall_margin', default_value='0.35',
             description='m. Tile centres are pulled this far off the walls. '
                         '2x2 is already clear; this is what stops a 4x4 '
                         'planning a centre 0.68 m from a wall.'),
         DeclareLaunchArgument(
-            'relock_standoff', default_value='1.60',
+            'relock_standoff', default_value='1.00',
             description='m out from the window wall the scan returns to. The '
                         'serpentine ends in the FAR corner and RELOCK needs '
                         'the whole aperture in frame -- about 1.26 x the '
@@ -666,7 +678,7 @@ def generate_launch_description():
                         'window centre-line lies from its marker. The mirror '
                         'strafe on the way out is the opposite of this.'),
         DeclareLaunchArgument(
-            'return_distance', default_value='11.0',
+            'return_distance', default_value='2.0',
             description='m BACKWARD from the window, looking for '
                         'window_marker_id again. Backward because directions '
                         'are in the TAKEOFF frame: the airframe is facing '
@@ -888,7 +900,7 @@ def generate_launch_description():
                         'single-traversal default: two approaches, two '
                         'traversals and a six-leg pattern do not fit in 150 s.'),
         DeclareLaunchArgument('request_offboard_from_ros', default_value='true'),
-        DeclareLaunchArgument('standoff_distance', default_value='2.0'),
+        DeclareLaunchArgument('standoff_distance', default_value='1.0'),
         DeclareLaunchArgument(
             'inside_distance', default_value='0.80',
             description='m past the window plane the INBOUND run ends: how '
@@ -897,7 +909,7 @@ def generate_launch_description():
                         'room the pattern needs and whether the window is '
                         'still in frame from inside.'),
         DeclareLaunchArgument(
-            'outside_distance', default_value='1.20',
+            'outside_distance', default_value='1.00',
             description='m past the window plane the OUTBOUND run ends.'),
         DeclareLaunchArgument('altitude_offset', default_value='0.0'),
         DeclareLaunchArgument('gear_below_camera', default_value='0.120'),

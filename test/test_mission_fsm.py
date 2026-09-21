@@ -254,12 +254,18 @@ def test_a_backward_leg_aims_behind_the_start(fsm):
     assert fsm.move_target_y == pytest.approx(0.0)
 
 
-def test_the_left_leg_goes_left(fsm):
+def test_the_turn_leg_goes_RIGHT_in_the_takeoff_frame(fsm):
+    """The bug this pins: the turn marker is on the EAST side of the arena.
+
+    Said as 'left' on the course because after the room the aircraft faces
+    SOUTH, and left of south is east. Coded as takeoff-frame left it flew
+    WEST, ~4 m out of a 7 m arena from a marker 1.3 m in from the west edge.
+    """
     leg = cruising(fsm, 'turn')
-    # DIRECTIONS['left'](cos0, sin0) = (sin0, -cos0) = (0, -1): -y in NED.
-    assert leg.direction == 'left'
+    assert leg.direction == 'right'
+    # DIRECTIONS['right'](cos0, sin0) = (-sin0, cos0) = (0, +1): +y (east) in NED.
     assert fsm.move_target_x == pytest.approx(0.0)
-    assert fsm.move_target_y == pytest.approx(-leg.distance)
+    assert fsm.move_target_y == pytest.approx(+leg.distance)
 
 
 def test_seeing_the_marker_ends_the_leg_early(fsm):
@@ -519,7 +525,7 @@ def test_the_legs_home_run_BACKWARD_in_the_takeoff_frame(fsm):
     d = {leg.name: leg.direction for leg in fsm.legs}
     assert d['outbound'] == 'forward'
     assert d['return'] == 'backward'
-    assert d['turn'] == 'left'
+    assert d['turn'] == 'right', "east, toward the turn marker -- see the arena drawing"
     assert d['pad'] == 'backward'
 
 
@@ -817,11 +823,15 @@ def test_the_ladder_does_not_fire_before_its_timer(fsm):
     assert fsm.SCAN_SPAN == pytest.approx(0.0), "no sweep until it escalates"
 
 
-def test_the_legs_are_eleven_metres(fsm):
+def test_the_leg_limits(fsm):
+    """11 m for the two transits; the return is a SHORT search, because the
+    exit ends directly over the window marker and an 11 m limit there would
+    fly a missed marker back to the net."""
     d = {leg.name: leg.distance for leg in fsm.legs}
     assert d['outbound'] == pytest.approx(11.0)
-    assert d['return'] == pytest.approx(11.0)
     assert d['pad'] == pytest.approx(11.0)
+    assert d['turn'] == pytest.approx(5.4)
+    assert d['return'] == pytest.approx(2.0)
 
 
 # --------------------------------------------- the missed-marker retry

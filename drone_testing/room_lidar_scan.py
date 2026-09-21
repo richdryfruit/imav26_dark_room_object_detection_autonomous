@@ -97,19 +97,29 @@ class LidarRoomScan:
     Y_AXIS = 'left'             # which side of it is +Y
 
     # ---- the room and the tiles -------------------------------------------
-    ROOM_X = 5.41               # m, nominal only -- the localizer measures it
-    ROOM_Y = 5.41
+    ROOM_X = 2.50               # m. The REAL dark room is 2.5 x 2.5 m. (5.41
+    ROOM_Y = 2.50               # was the localizer's built-in default for
+                                # the 2.2x-scaled sim world, never measured.)
     TILES_X = 2
     TILES_Y = 2
     TILE_ORDER = 'serpentine'   # serpentine | raster
-    WALL_MARGIN = 0.90          # m, minimum tile-centre distance from a wall
+    # The in-room pattern, as RELATIVE moves in the body frame the aircraft
+    # entered the room on: forward = the way it flew in. The same grammar
+    # offboard_sequence parses. Given on the day; this is the default.
+    # A trailing yaw is not flown as a waypoint -- the scan always finishes
+    # with the half turn that faces the window for the relock.
+    ROOM_SEQUENCE = 'forward 0.8, right 0.8, backward 0.8, left 0.8, yaw 180'
+    WALL_MARGIN = 0.35          # m, minimum waypoint distance from a wall:
+                                # 0.13 m of airframe half-width plus 0.22 m of
+                                # air. In a 2.5 m room this is what bounds
+                                # every waypoint to |x|,|y| <= 0.90 m.
 
     # ---- flying them ------------------------------------------------------
     TILE_DWELL_SECONDS = 3.0    # s held at a centre while the detector works
     TILE_ARRIVE_EPS = 0.15      # m that counts as arrived
     TILE_SETTLE_SECONDS = 0.5   # s inside that before the dwell clock starts
     TILE_SPEED = 0.35           # m/s the virtual setpoint is walked at
-    RELOCK_STANDOFF = 1.60      # m out from the window wall that the scan
+    RELOCK_STANDOFF = 1.00      # m out from the window wall that the scan
                                 # returns to before handing back to RELOCK.
                                 # The serpentine ends in the FAR corner, and
                                 # RELOCK has to see the whole aperture again
@@ -170,6 +180,8 @@ class LidarRoomScan:
                 f"{self.TILES_X}x{self.TILES_Y}.")
         self.TILE_ORDER = str(self.declare_parameter(
             'order', self.TILE_ORDER).value).strip().lower()
+        self.ROOM_SEQUENCE = str(self.declare_parameter(
+            'room_scan_sequence', self.ROOM_SEQUENCE).value).strip()
         self.WALL_MARGIN = float(self._declare_number(
             'wall_margin', self.WALL_MARGIN))
         self.TILE_DWELL_SECONDS = float(self._declare_number(
@@ -209,6 +221,8 @@ class LidarRoomScan:
         self.tile_dwell_started = None
         self.tiles_done = []
         self.arena_entry = None   # arena (x, y) the room was entered at
+        self.arena_entry_yaw = None  # arena yaw it entered on
+        self.waypoints_clamped = []
 
         self.create_subscription(Odometry, self.LIDAR_ODOM_TOPIC,
                                  self.lidar_odom_callback, 10)
@@ -438,3 +452,61 @@ class LidarRoomScan:
         x = max(-lim, min(lim, x))
         y = -(self.ROOM_Y / 2.0) + self.RELOCK_STANDOFF
         return x, max(-(self.ROOM_Y / 2.0), y)
+
+    def build_room_waypoints(self):
+        """The room sequence, as absolute arena waypoints, clamped off the walls.
+
+        Built from the ENTRY pose, not the room centre: the moves are relative
+        to where the aircraft actually is and which way it is actually facing
+        after the traversal, measured off the lidar at the end of the settle.
+        forward = the entry heading; right = that heading turned clockwise.
+
+        THE CLAMP IS THE SAFETY PROPERTY. The room is 2.5 m, the pattern is
+        0.8 m moves, and the window is not necessarily centred in its wall --
+        so "right 0.8" from a window that sits to the right of centre would
+        plan a point past the east wall. Every waypoint is therefore forced
+        inside |x|,|y| <= room/2 - wall_margin, and any that had to move is
+        recorded and reported, so a clamped pattern is loud rather than
+        silent. A wall strike is not a possible outcome of a bad sequence.
+        """
+        from drone_testing.offboard_sequence import parse_sequence
+
+        if self.arena_entry is None or self.arena_entry_yaw is None:
+            return []
+        steps = parse_sequence(self.ROOM_SEQUENCE)
+
+        x, y = self.arena_entry
+        yaw = self.arena_entry_yaw
+        # ENU: yaw is counter-clockwise from +X. Forward is (cos, sin); right
+        # is forward turned CLOCKWISE 90 degrees, which is (sin, -cos).
+        fx, fy = math.cos(yaw), math.sin(yaw)
+        rx, ry = math.sin(yaw), -math.cos(yaw)
+
+        lim_x = max(0.0, self.ROOM_X / 2.0 - self.WALL_MARGIN)
+        lim_y = max(0.0, self.ROOM_Y / 2.0 - self.WALL_MARGIN)
+
+        wps, clamped = [], []
+        for step in steps:
+            if step.kind != 'move':
+                continue        # yaw handled by the closing half turn
+            d = float(step.arg)
+            if step.name == 'forward':
+                x, y = x + fx * d, y + fy * d
+            elif step.name == 'backward':
+                x, y = x - fx * d, y - fy * d
+            elif step.name == 'right':
+                x, y = x + rx * d, y + ry * d
+            elif step.name == 'left':
+                x, y = x - rx * d, y - ry * d
+            cx = max(-lim_x, min(lim_x, x))
+            cy = max(-lim_y, min(lim_y, y))
+            if abs(cx - x) > 1e-6 or abs(cy - y) > 1e-6:
+                clamped.append((step.name, d, (x, y), (cx, cy)))
+            # Carry on from the CLAMPED point: the next move is relative to
+            # where the aircraft will really be, not to a point it refused.
+            x, y = cx, cy
+            wps.append((cx, cy))
+
+        self.waypoints_clamped = clamped
+        self.tile_centres_arena = wps
+        return wps

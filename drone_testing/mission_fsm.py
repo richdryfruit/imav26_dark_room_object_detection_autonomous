@@ -331,9 +331,13 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
                                 # MEASURED on the course. 0 disables both
                                 # strafes and approaches obliquely instead.
     WINDOW_OFFSET_DIRECTION = 'left'
-    RETURN_DISTANCE = 11.0      # m BACKWARD, out of the window -> window
-                                # marker. Only ~3 m is ever flown (standoff
-                                # plus outside_distance); the rest is margin.
+    RETURN_DISTANCE = 2.0       # m BACKWARD, a SHORT search for the window
+                                # marker. The exit ends outside_distance past
+                                # the window plane -- set equal to the
+                                # marker's 1.0 m, so the marker is directly
+                                # under the aircraft on arrival. This is a
+                                # margin, not a transit: an 11 m limit here
+                                # would fly a missed marker back to the net.
     TURN_DISTANCE = 5.4         # m LEFT, window marker -> turn marker
     PAD_DISTANCE = 11.0         # m BACKWARD, turn marker -> landing pad.
                                 # This lands the aircraft level with the
@@ -556,7 +560,13 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
                 retry=False),
             Leg('return', 'backward', self.RETURN_DISTANCE,
                 self.WINDOW_MARKER_ID, 'turn'),
-            Leg('turn', 'left', self.TURN_DISTANCE, self.TURN_MARKER_ID, 'pad'),
+            # RIGHT in the takeoff frame -- east, toward the turn marker.
+            # Said as 'left' on the course because after the room the
+            # aircraft faces SOUTH, and left of south is east. Coded as
+            # takeoff-frame left it flew WEST: from a marker ~1.3 m in from
+            # the west edge, 5.4 m west is ~4 m outside a 7 m arena, into the
+            # net. The arena drawing puts the turn marker on the east side.
+            Leg('turn', 'right', self.TURN_DISTANCE, self.TURN_MARKER_ID, 'pad'),
             Leg('pad', 'backward', self.PAD_DISTANCE, self.PAD_MARKER_ID,
                 'descend', required=True),
         ]
@@ -1478,7 +1488,10 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
         are now measured from the WALLS instead of from EKF2's origin, so
         they stop moving when EKF2 drifts.
         """
-        self.build_tile_centres()
+        # Waypoints are NOT built here. They are relative to the entry pose,
+        # which the lidar only measures once the transform has settled --
+        # see the end of _handle_tile_settle.
+        self.tile_centres_arena = []
         self.tile_index = 0
         self.tiles_done = []
         self.room_entry_heading = 0.0
@@ -1492,12 +1505,11 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
         self.YAW_RATE = self.cruise_yaw_rate
         self._arm_dolls('inside the room, starting the tile scan')
         self.get_logger().warning(
-            f"TILE SCAN: {self.TILES_X}x{self.TILES_Y} = "
-            f"{len(self.tile_centres_arena)} tiles in a "
-            f"{self.ROOM_X:.2f}x{self.ROOM_Y:.2f} m room, {self.TILE_ORDER} "
-            f"order, {self.TILE_DWELL_SECONDS:.0f} s at each. Planning in the "
-            f"arena frame: +X is the {self.FRONT_WALL.upper()} wall, +Y to its "
-            f"{self.Y_AXIS.upper()}.")
+            f"ROOM SCAN on the lidar: '{self.ROOM_SEQUENCE}' in a "
+            f"{self.ROOM_X:.2f}x{self.ROOM_Y:.2f} m room, "
+            f"{self.TILE_DWELL_SECONDS:.0f} s at each point, every point kept "
+            f"{self.WALL_MARGIN:.2f} m off the walls. Arena frame: +X is the "
+            f"{self.FRONT_WALL.upper()} wall, +Y to its {self.Y_AXIS.upper()}.")
         self._enter_stage(self.TILE_SETTLE)
 
     def _handle_tile_settle(self):
@@ -1548,9 +1560,28 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
         self.arena_entry = (ax, ay)
         # ...and the heading it came in on. The window is directly BEHIND that
         # heading, so the way to face it again is a half turn. The old box
-        # pattern got this for free from its two 90-degree legs; a tile scan
-        # never yaws, so it has to be commanded.
+        # pattern got this for free from its two 90-degree legs; this scan
+        # does not yaw between points, so it has to be commanded.
         self.room_entry_heading = float(self.local_position.heading)
+        # The same heading in the ARENA frame, which the room moves are
+        # expressed relative to: forward = the way the aircraft flew in.
+        self.arena_entry_yaw = float(self.lidar_fix[3])
+
+        wps = self.build_room_waypoints()
+        if not wps:
+            self._tile_scan_give_up(
+                f"room_scan_sequence '{self.ROOM_SEQUENCE}' produced no moves")
+            return
+        for name, d, want, got in self.waypoints_clamped:
+            self.get_logger().error(
+                f"CLAMPED '{name} {d:.2f}': it would have planned arena "
+                f"({want[0]:+.2f}, {want[1]:+.2f}) m, less than "
+                f"{self.WALL_MARGIN:.2f} m from a wall in a "
+                f"{self.ROOM_X:.2f} m room. Flying ({got[0]:+.2f}, "
+                f"{got[1]:+.2f}) instead. Check where the window sits in its "
+                "wall -- the pattern is relative to it.")
+        plan = ' -> '.join(f"({x:+.2f},{y:+.2f})" for x, y in wps)
+        self.get_logger().warning(f"Room waypoints (arena): {plan}")
         self.get_logger().warning(
             f"Stable on the lidar at arena ({ax:+.2f}, {ay:+.2f}) m, transform "
             f"latched. Flying {len(self.tile_centres_arena)} tiles.")
@@ -1750,6 +1781,26 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
             f"Tile scan {outcome}. Scanned: {self.scan_summary()}. "
             "Turning for the way out.")
         self._begin_relock()
+
+    # ----------------------------------------------- the doll detector
+
+    def _lock_on_window(self, reason):
+        """Start the doll detector the moment the window is FIRST found.
+
+        The inherited node arms it at the inbound traverse commit. It is
+        started earlier here, at the first lock, from outside the room: the
+        TensorRT engine takes seconds to load on its first enabled frame, and
+        starting it at the commit spends those seconds inside the room, which
+        is the only place it is needed. Anything it sees through the aperture
+        from outside is harmless -- doll_detect counts by geotagged position,
+        and there are no dolls between the marker and the wall to count.
+
+        Only on the way IN. On the way out the detector is already on and is
+        switched off at the outbound clear, as before.
+        """
+        if self.phase == self.PHASE_OUTSIDE:
+            self._arm_dolls("window first detected, before entering the room")
+        super()._lock_on_window(reason)
 
     # ----------------------------------------------------- the room height
 
