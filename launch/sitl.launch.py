@@ -134,15 +134,14 @@ def _south_wall():
         if z1 < zhi:
             parts.append((f'room_S_over_{tag}', x0, x1, z1, zhi))
     out = [_box(n, x0, x1, z0, z1, y, T, wall) for n, x0, x1, z0, z1 in parts]
-    # Bands on BOTH faces: the relock finds the same window from inside.
-    for face, yb in (('o', y - T / 2 - 0.004), ('i', y + T / 2 + 0.004)):
-        for tag, (x0, x1, z0, z1), rgb in (('blue', b, '0.0 0.3 1.0'),
-                                           ('red', r, '1.0 0.0 0.0')):
-            e = _BAND
-            for side, box in (('top', (x0 - e, x1 + e, z1, z1 + e)),
-                              ('bot', (x0 - e, x1 + e, z0 - e, z0)),
-                              ('L', (x0 - e, x0, z0, z1)), ('R', (x1, x1 + e, z0, z1))):
-                out.append(_box(f'room_{tag}_{side}_{face}', *box, yb, 0.006, rgb))
+    yb = y - T / 2 - 0.004                      # just proud of the outside face
+    for tag, (x0, x1, z0, z1), rgb in (('blue', b, '0.0 0.3 1.0'),
+                                       ('red', r, '1.0 0.0 0.0')):
+        e = _BAND
+        for side, box in (('top', (x0 - e, x1 + e, z1, z1 + e)),
+                          ('bot', (x0 - e, x1 + e, z0 - e, z0)),
+                          ('L', (x0 - e, x0, z0, z1)), ('R', (x1, x1 + e, z0, z1))):
+            out.append(_box(f'room_{tag}_{side}', *box, yb, 0.006, rgb))
     return '\n'.join(out)
 
 
