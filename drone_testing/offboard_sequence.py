@@ -411,6 +411,12 @@ class OffboardSequence(Node):
             'climb_speed', self.CLIMB_SPEED))
         self.LAND_SPEED = float(self._declare_number(
             'land_speed', self.LAND_SPEED))
+        # SITL ONLY. A simulated rangefinder on the pad reads a perfectly
+        # constant value, EKF2 flags it stuck and stops fusing it -- which a
+        # real, noisy sensor never does. false skips the EKF2 rangefinder-fusion
+        # gate below. Never set false on the aircraft.
+        self.RANGEFINDER_CHECKS = bool(self.declare_parameter(
+            'rangefinder_checks', True).value)
         self.MIN_ALTITUDE = float(self._declare_number(
             'min_altitude', self.MIN_ALTITUDE))
         self.MAX_ALTITUDE = float(self._declare_number(
@@ -814,6 +820,8 @@ class OffboardSequence(Node):
 
         See offboard_translate.py for the full annotated version of this note.
         """
+        if not self.RANGEFINDER_CHECKS:
+            return True
         f = self.estimator_flags
         if f is None:
             lp = self.local_position

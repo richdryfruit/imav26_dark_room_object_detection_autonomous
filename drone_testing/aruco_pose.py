@@ -306,12 +306,21 @@ class ArucoPose(Node):
         except AttributeError:
             raise SystemExit(f"Unknown aruco_dict '{dict_name}'.")
 
-        params = cv2.aruco.DetectorParameters()
+        # OpenCV < 4.7 (e.g. Ubuntu 24.04's apt 4.6) has the old aruco API:
+        # DetectorParameters() there builds an object that segfaults on the
+        # first attribute write, and there is no ArucoDetector.
+        new_api = hasattr(cv2.aruco, 'ArucoDetector')
+        params = (cv2.aruco.DetectorParameters() if new_api
+                  else cv2.aruco.DetectorParameters_create())
         # Sub-pixel corner refinement. This is the difference between a corner
         # good to a pixel and one good to a tenth, and every centimetre of
         # lateral accuracy comes through those four corners.
         params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-        self._detector = cv2.aruco.ArucoDetector(dictionary, params)
+        if new_api:
+            self._detect = cv2.aruco.ArucoDetector(dictionary, params).detectMarkers
+        else:
+            self._detect = lambda img: cv2.aruco.detectMarkers(  # noqa: E731
+                img, dictionary, parameters=params)
 
         s = self.marker_size / 2.0
         # TL, TR, BR, BL -- cv2.aruco's corner order, and the order
@@ -481,7 +490,7 @@ class ArucoPose(Node):
             self.K = self._intrinsics(w, h)
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        corners, ids, _ = self._detector.detectMarkers(gray)
+        corners, ids, _ = self._detect(gray)
         seen = ids.flatten().tolist() if ids is not None else []
 
         pose = None
