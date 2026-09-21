@@ -114,6 +114,13 @@ def _setup(context):
         # No RC in SITL: without this PX4 raises manual_control_signal_lost
         # and drops out of Offboard into Hold.
         'COM_RC_IN_MODE': 4,
+        # ONE EKF on one IMU and one compass, as on the aircraft. The sim
+        # exposes 3 IMUs and 2 mags, PX4 runs an EKF per pair, and at arming
+        # the selector switched to an instance 147 deg out in heading and 2 m
+        # out in position -> local position invalid -> auto-disarm. Boot-time
+        # only (read at ekf2 start), hence the PX4_PARAM_* route.
+        'EKF2_MULTI_IMU': 0, 'SENS_IMU_MODE': 1,
+        'EKF2_MULTI_MAG': 0, 'SENS_MAG_MODE': 1,
     }
     env_params = ' '.join(f'PX4_PARAM_{k}={v}' for k, v in params.items())
     set_params = '; '.join(f'bin/px4-param set {k} {v}' for k, v in params.items())
