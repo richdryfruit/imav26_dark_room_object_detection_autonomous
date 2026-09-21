@@ -1,5 +1,7 @@
 # drone_testing
 
+> **Mission split into two flights** (straight leg → marker; window + dark room → back to the marker), for the real drone and in SITL: see **[MISSION_PARTS.md](MISSION_PARTS.md)**.
+
 ROS 2 package for autonomous offboard flight on a PX4 vehicle, running on a
 Jetson companion computer.
 
