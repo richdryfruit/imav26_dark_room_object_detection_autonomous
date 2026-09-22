@@ -55,9 +55,12 @@ def test_retrace_returns_to_the_inbound_height_then_flies_out(fsm):
     fsm.target_z = -1.95                 # inbound traverse height (NED)
     fsm._begin_room = lambda: None       # only the capture matters here
     fsm.inbound_z = -1.95
+    fsm.inbound_hagl = 1.95                 # TFmini floor distance inbound
+    fsm.local_position.dist_bottom = 1.75   # floor distance now (EKF says 1.75)
     fsm._begin_relock()
     assert fsm.phase == fsm.PHASE_OUT
     assert fsm.current_stage == fsm.ALT_CHANGE
+    # 1.75 (EKF now) + (1.95 - 1.75) on the rangefinder
     assert fsm.alt_target == pytest.approx(1.95)
     assert fsm.alt_next == 'exit'
     fsm._dispatch_after('exit')
@@ -146,3 +149,21 @@ def test_blind_push_done_inbound_goes_on_into_the_room_not_down(fsm):
     fsm._begin_landing = landed.append
     fsm._blind_push_done(4.47)
     assert fsm.current_stage == fsm.CLEAR and not landed
+
+
+def test_exit_height_is_range_relative_not_the_reset_ekf_datum(fsm):
+    """After the sill resets EKF2's height, its altitude is offset; the exit
+    must still come back to the inbound height ABOVE THE FLOOR."""
+    fsm.inbound_hagl = 3.78
+    fsm.local_position.z = -3.21            # EKF: 3.21 m (datum shifted)
+    fsm.local_position.dist_bottom = 3.60   # truth on the TFmini: 3.60 m
+    fsm._begin_relock()
+    assert fsm.alt_target == pytest.approx(3.21 + (3.78 - 3.60))
+
+
+def test_inbound_floor_height_is_captured_at_the_crossing(fsm):
+    fsm.phase = fsm.PHASE_IN
+    fsm.local_position.dist_bottom = 3.78
+    fsm._enter_stage(fsm.TRAVERSE)
+    fsm._update_crossing()
+    assert fsm.inbound_hagl == pytest.approx(3.78)

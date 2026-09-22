@@ -115,6 +115,7 @@ class MissionFSMPart2(MissionFSM):
             raise SystemExit(
                 f"exit_mode must be 'retrace' or 'relock'; got '{self.EXIT_MODE}'.")
         self.inbound_z = None           # target_z of the inbound traverse
+        self.inbound_hagl = None        # TFmini height above floor, inbound
 
         # ---- crossing the wall on the TFmini alone ----------------------
         # The only height source is the downward rangefinder. For the
@@ -229,6 +230,12 @@ class MissionFSMPart2(MissionFSM):
             return
         if self._crossing_now():
             if not self._crossing:
+                # The inbound height ABOVE THE FLOOR, measured by the TFmini
+                # before it reaches the sill. The exit flies back to this --
+                # not to an EKF2 altitude, whose datum every crossing resets.
+                if (self.inbound_hagl is None and self.phase != self.PHASE_OUT
+                        and lp is not None and lp.dist_bottom_valid):
+                    self.inbound_hagl = float(lp.dist_bottom)
                 self._crossing = True
                 self.get_logger().warning(
                     "CROSSING the wall: altitude on vertical velocity (hold 0) "
@@ -313,15 +320,24 @@ class MissionFSMPart2(MissionFSM):
         self.EXIT_DISTANCE = self.OUTSIDE_DISTANCE
         self.MOVE_SPEED = self.APPROACH_SPEED
         leg = self.legs[self.leg_by_name['exit']]
-        if self.inbound_z is not None and self.home_z is not None:
-            alt = self.home_z - self.inbound_z
+        lp = self.local_position
+        rel = self.relative_altitude()
+        if (self.inbound_hagl is not None and lp is not None
+                and lp.dist_bottom_valid and rel is not None):
+            # Range-relative: move by (inbound floor height - floor height
+            # now), applied to wherever the EKF thinks it is now.
+            alt = rel + (self.inbound_hagl - float(lp.dist_bottom))
             self.get_logger().warning(
-                f"EXIT (retrace): back to the inbound traverse height "
-                f"{alt:.2f} m, then {leg.distance:.2f} m straight back out "
-                "along the takeoff heading. The window is unmarked inside, so "
-                "no camera relock.")
-            self._begin_alt_change(alt, 'exit', 'inbound traverse height')
+                f"EXIT (retrace): back to the inbound height above the floor "
+                f"({self.inbound_hagl:.2f} m on the TFmini; now "
+                f"{float(lp.dist_bottom):.2f} m), then {leg.distance:.2f} m "
+                "straight back out along the takeoff heading. The window is "
+                "unmarked inside, so no camera relock.")
+            self._begin_alt_change(alt, 'exit', 'inbound height above the floor')
         else:
+            self.get_logger().warning(
+                "EXIT (retrace): no inbound TFmini height recorded; flying out "
+                "at the current height.")
             self._begin_leg_named('exit')
 
     # ------------------------------------------------------------ the start
