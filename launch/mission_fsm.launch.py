@@ -86,6 +86,14 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
+# The down camera (the Logitech under usb_cam, 320x240, focus locked at 0 by
+# imav_bringup), calibrated 2026-09-23 with tools/calibrate_c920.py: 18 views,
+# 0.23 px. aruco_pose takes it as parameters; floor_line and mission_fsm_full
+# only take a FOV (pad_hfov_deg / track_hfov_deg = 59.2, from fx). Valid ONLY
+# at 320x240 -- pad_image_topic:='' opens the camera at pad_width x pad_height
+# instead, so pass pad_fx:=0.0 there to fall back to pad_hfov_deg.
+C920_DISTORTION = [0.050757, -0.089749, -0.003237, 0.000824, 0.0]
+
 
 def generate_launch_description():
     agent_only = LaunchConfiguration('agent_only')
@@ -167,6 +175,11 @@ def generate_launch_description():
                     'marker_size': LaunchConfiguration('pad_marker_size'),
                     'aruco_dict': LaunchConfiguration('pad_aruco_dict'),
                     'hfov_deg': LaunchConfiguration('pad_hfov_deg'),
+                    'fx': LaunchConfiguration('pad_fx'),
+                    'fy': LaunchConfiguration('pad_fy'),
+                    'cx': LaunchConfiguration('pad_cx'),
+                    'cy': LaunchConfiguration('pad_cy'),
+                    'distortion_coeffs': C920_DISTORTION,
                     'image_rotate': LaunchConfiguration('pad_image_rotate'),
                     'detect_rate': LaunchConfiguration('pad_detect_rate'),
                     'stream_port': LaunchConfiguration('pad_stream_port'),
@@ -849,7 +862,16 @@ def generate_launch_description():
                                           'be right: it sets the metric scale '
                                           'of the whole pose.'),
         DeclareLaunchArgument('pad_aruco_dict', default_value='DICT_5X5_50'),
-        DeclareLaunchArgument('pad_hfov_deg', default_value='78.0'),
+        DeclareLaunchArgument('pad_hfov_deg', default_value='59.2',
+                              description='Down camera horizontal FOV, from '
+                                          'its calibration (was a 78 guess).'),
+        DeclareLaunchArgument('pad_fx', default_value='281.43',
+                              description='Calibrated intrinsics of the down '
+                                          'camera at 320x240. 0.0 = derive from '
+                                          'pad_hfov_deg, no undistortion.'),
+        DeclareLaunchArgument('pad_fy', default_value='282.18'),
+        DeclareLaunchArgument('pad_cx', default_value='156.20'),
+        DeclareLaunchArgument('pad_cy', default_value='118.30'),
         DeclareLaunchArgument('pad_image_rotate', default_value='0',
                               description='0|90|180|270, applied before '
                                           'detection. Use this if the camera '

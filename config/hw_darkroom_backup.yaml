@@ -64,7 +64,7 @@
     line_trust: 0.80
     track_width_m: 0.60
     track_width_tol: 0.25
-    track_hfov_deg: 70.4
+    track_hfov_deg: 59.2          # calibrated (70.4 was a guess)
     track_lane_guard: 0.60
 
     # ---- speeds (as hw_full.yaml) ---------------------------------------

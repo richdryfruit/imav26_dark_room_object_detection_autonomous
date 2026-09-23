@@ -19,9 +19,11 @@ is found and enough has changed, prints the running count, and writes the
 result once it has `views` of them.
 
 The file it writes is a ROS camera_info YAML. Point usb_cam at it
-(camera_info_url: file:///home/.../c920.yaml) and every node downstream gets
-real intrinsics through CameraInfo, with no other change: aruco_pose,
-doll_detect and floor_line all prefer CameraInfo over their fov parameter.
+(camera_info_url: file:///home/.../c920.yaml) and doll_detect gets real
+intrinsics through CameraInfo. aruco_pose and floor_line do NOT read
+CameraInfo: aruco_pose takes fx/fy/cx/cy/distortion_coeffs parameters and
+floor_line only hfov_deg. tools/calibrate_c920.py is the guided, on-screen
+version of this node (what the down camera was actually calibrated with).
 """
 
 import os

@@ -171,18 +171,28 @@ FINAL DOLL COUNT: 3. Positions (ARENA, m): ...
 
 Restart it per flight: the count is cumulative within one run.
 
-## 6. Calibrate the down camera (worth doing once)
+## 6. Down camera calibration (done 2026-09-23)
 
-Everything that turns pixels into metres — marker offsets, doll positions, the
-carpet lane width check — assumes a 70.4° field of view and no distortion:
+The down camera is calibrated at **320x240, focus locked at 0**: horizontal
+FOV **59.2°** (the old 70.4° / 78° guesses made every down-camera distance
+20-30 % short), 0.23 px reprojection error.
+
+- `imav_bringup` locks the focus (`v4l2-ctl`, before usb_cam starts) and
+  publishes the calibration on `/camera_info`
+  (`imav_bringup/config/c920_320x240.yaml`). doll_detect reads that.
+- `aruco_pose` gets fx/fy/cx/cy/distortion from `mission_fsm.launch.py`
+  (`pad_fx` ...); floor_line and `track_hfov_deg` get the 59.2° FOV.
+
+Redo it if the camera, its resolution or its focus changes. On a monitor
+plugged into the Jetson (it needs a screen, not SSH):
 
 ```bash
-ros2 run drone_testing calibrate_camera --ros-args \
-  -p image_topic:=/image_raw -p squares_x:=9 -p squares_y:=6 -p square_size:=0.025
+python3 ~/offboard_imav26_test/tools/calibrate_c920.py
 ```
-Show a chessboard around the frame; it writes a `camera_info` YAML and prints
-the true FOV. Point `usb_cam`'s `camera_info_url` at it and every node picks it
-up.
+It stops usb_cam, walks through 19 board poses and writes
+`~/c920_320x240.yaml`. Board: 9x6 squares (8x5 inner corners). Then copy it to
+`imav_bringup/config/`, rebuild imav_bringup, and update the `pad_*` values in
+`mission_fsm.launch.py` and `track_hfov_deg` in `config/hw_*.yaml`.
 
 ---
 

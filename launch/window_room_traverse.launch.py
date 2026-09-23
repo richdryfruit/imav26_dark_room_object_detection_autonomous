@@ -624,9 +624,10 @@ def generate_launch_description():
                         'lies/stands). Only scales range: 5 cm wrong at 1.75 m '
                         'moves a doll 1 m off-centre by ~3 cm.'),
         DeclareLaunchArgument(
-            'doll_hfov_deg', default_value='70.4',
-            description='C920 horizontal FOV, used when its CameraInfo is '
-                        'uncalibrated (usb_cam without a calibration file).'),
+            'doll_hfov_deg', default_value='59.2',
+            description='C920 horizontal FOV (measured by calibration), used '
+                        'only when its CameraInfo is uncalibrated (usb_cam '
+                        'without a calibration file).'),
         DeclareLaunchArgument(
             'doll_geotag_frame', default_value='arena',
             description='arena = tag in the lidar room frame (/lidar/odom_kf); '
