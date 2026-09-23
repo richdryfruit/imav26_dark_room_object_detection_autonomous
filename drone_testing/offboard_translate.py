@@ -216,6 +216,7 @@ class OffboardTranslate(Node):
     SETPOINT_WARMUP = 20        # setpoints streamed before requesting Offboard (@20 Hz = 1 s)
     OFFBOARD_TIMEOUT = 10.0
     ARMING_TIMEOUT = 10.0
+    PX4_DATA_GRACE = 3.0             # s in PREPARATION before a missing PX4 topic is an error
     TAKEOFF_TIMEOUT = 20.0
     LANDING_TIMEOUT = 30.0
     DISARM_TIMEOUT = 5.0
@@ -238,7 +239,7 @@ class OffboardTranslate(Node):
                                     # commands dropped rather than acted on.
     # If you switch to Offboard from your RC transmitter instead of from
     # this node, set this to False.
-    REQUEST_OFFBOARD_FROM_ROS = True
+    REQUEST_OFFBOARD_FROM_ROS = False  # the TX (or the dashboard) switches Offboard
     # ----------------------------------------------------------------------
 
     def __init__(self):
@@ -285,11 +286,11 @@ class OffboardTranslate(Node):
         )
 
         self.offboard_control_mode_pub = self.create_publisher(
-            OffboardControlMode, '/fmu/in/offboard_control_mode', 10)
+            OffboardControlMode, '/uav_2/fmu/in/offboard_control_mode', 10)
         self.vehicle_command_pub = self.create_publisher(
-            VehicleCommand, '/fmu/in/vehicle_command', 10)
+            VehicleCommand, '/uav_2/fmu/in/vehicle_command', 10)
         self.trajectory_setpoint_pub = self.create_publisher(
-            TrajectorySetpoint, '/fmu/in/trajectory_setpoint', 10)
+            TrajectorySetpoint, '/uav_2/fmu/in/trajectory_setpoint', 10)
 
         # Compact machine-readable status for the LCD node (and anything else
         # that wants to watch the state machine without parsing log text).
@@ -306,7 +307,7 @@ class OffboardTranslate(Node):
         # bridges it. This is the only place that tells us whether EKF2 is
         # actually fusing the rangefinder -- see rangefinder_is_healthy().
         self.estimator_flags_sub = self.create_subscription(
-            EstimatorStatusFlags, '/fmu/out/estimator_status_flags',
+            EstimatorStatusFlags, '/uav_2/fmu/out/estimator_status_flags',
             self.estimator_flags_callback, qos_profile=sensor_qos)
 
         # PX4's own account of why it would take the aircraft away from us.
@@ -314,7 +315,7 @@ class OffboardTranslate(Node):
         # difference between "Offboard lost" and knowing WHICH condition
         # tripped, which is otherwise only visible in the ulog or QGC.
         self.failsafe_flags_sub = self.create_subscription(
-            FailsafeFlags, '/fmu/out/failsafe_flags',
+            FailsafeFlags, '/uav_2/fmu/out/failsafe_flags',
             self.failsafe_flags_callback, qos_profile=sensor_qos)
 
         # The land detector topic is unversioned on some builds and _v1 on
@@ -323,8 +324,8 @@ class OffboardTranslate(Node):
             self.create_subscription(
                 VehicleLandDetected, topic, self.land_detected_callback,
                 qos_profile=sensor_qos)
-            for topic in ('/fmu/out/vehicle_land_detected',
-                          '/fmu/out/vehicle_land_detected_v1')
+            for topic in ('/uav_2/fmu/out/vehicle_land_detected',
+                          '/uav_2/fmu/out/vehicle_land_detected_v1')
         ]
 
         self.nav_state = VehicleStatus.NAVIGATION_STATE_MANUAL
@@ -520,7 +521,7 @@ class OffboardTranslate(Node):
 
     def failsafe_summary(self):
         if self.failsafe_flags is None:
-            return "/fmu/out/failsafe_flags is not being published"
+            return "/uav_2/fmu/out/failsafe_flags is not being published"
         active = self.active_failsafes()
         return ", ".join(active) if active else "none active"
 
@@ -824,9 +825,15 @@ class OffboardTranslate(Node):
                         reason = ("EKF2 is not fusing the rangefinder at all "
                                   "(cs_rng_hgt and cs_rng_terrain both false) -- "
                                   "check EKF2_RNG_CTRL and that the sensor is on the bus")
-            self.get_logger().error(
-                f"Not arming: {reason}.", throttle_duration_sec=2.0)
-            self.log_flight_state()
+            # PX4's topics start arriving at different times; for the first
+            # few seconds a missing one is just not here yet, not a fault.
+            if self._in_stage_for() < self.PX4_DATA_GRACE:
+                self.get_logger().info(
+                    f"Waiting for PX4 data: {reason}.", throttle_duration_sec=2.0)
+            else:
+                self.get_logger().error(
+                    f"Not arming: {reason}.", throttle_duration_sec=2.0)
+                self.log_flight_state()
             self.setpoint_counter = 0
             return
 

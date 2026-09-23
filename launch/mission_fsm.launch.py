@@ -27,8 +27,7 @@ The support stack is NOT re-implemented here. This file INCLUDES
 window_room_traverse.launch.py with agent_only:=true, so that file brings up
 exactly what it always brings up --
 
-    the uXRCE-DDS agent, the RealSense D435i, the emitter parameter, the
-    window detector, the doll model (gated on /doll_detect_enable), the
+    the window detector, the doll model (gated on /doll_detect_enable), the
     room_display TFT bridge and the QGC doll status stream
 
 -- and does NOT bring up its own flight node. Every camera, detector, window,
@@ -154,6 +153,10 @@ def generate_launch_description():
                 output='screen',
                 emulate_tty=True,
                 parameters=[{
+                    # imav_bringup's usb_cam owns the C920; opening the
+                    # device here as well fails (one reader per V4L2 device).
+                    # Empty pad_image_topic = open pad_camera_device directly.
+                    'image_topic': LaunchConfiguration('pad_image_topic'),
                     'camera_index': LaunchConfiguration('pad_camera_index'),
                     'camera_device': LaunchConfiguration('pad_camera_device'),
                     'width': LaunchConfiguration('pad_width'),
@@ -187,6 +190,18 @@ def generate_launch_description():
     #
     # Both read /doll_count and apply the same default offset, so the two
     # never disagree.
+    # The carpet strip under the straight leg (mission_fsm_full follows it).
+    line_node = Node(
+        package='drone_testing', executable='floor_line', name='floor_line',
+        output='screen', emulate_tty=True,
+        parameters=[{'image_topic': LaunchConfiguration('pad_image_topic'),
+                     'hfov_deg': LaunchConfiguration('pad_hfov_deg'),
+                     'sat_min': LaunchConfiguration('line_sat_min'),
+                     'stream_port': LaunchConfiguration('line_stream_port'),
+                     'min_width': LaunchConfiguration('line_min_width'),
+                     'max_width': LaunchConfiguration('line_max_width')}],
+        condition=IfCondition(LaunchConfiguration('line_detect')))
+
     doll_text_node = Node(
         package='drone_testing',
         executable='doll_report_text',
@@ -230,6 +245,7 @@ def generate_launch_description():
                     'detect_seconds': LaunchConfiguration('detect_seconds'),
                     'relock_on_loss': LaunchConfiguration('relock_on_loss'),
                     'flight_seconds': LaunchConfiguration('flight_seconds'),
+                    'arm_from_ros': LaunchConfiguration('arm_from_ros'),
                     'request_offboard_from_ros': LaunchConfiguration(
                         'request_offboard_from_ros'),
                     # ---- the two traversals ----
@@ -391,7 +407,7 @@ def generate_launch_description():
                     'precision_descent': LaunchConfiguration('precision_descent'),
                     'blind_commit_altitude': LaunchConfiguration(
                         'blind_commit_altitude'),
-                })],
+                }), LaunchConfiguration('hw_params')],
             )
         ],
         condition=UnlessCondition(agent_only),
@@ -404,6 +420,12 @@ def generate_launch_description():
             description='Start the support stack but not the flight node, so '
                         'it can be run by hand and keep the q/k keyboard '
                         'aborts. false = fly the whole mission from here.'),
+        DeclareLaunchArgument(
+            'hw_params',
+            default_value=PathJoinSubstitution([
+                FindPackageShare('drone_testing'), 'config', 'hw_none.yaml']),
+            description='Params file loaded AFTER the values above (it wins): '
+                        'config/hw_part1.yaml / hw_part2.yaml on the aircraft.'),
         DeclareLaunchArgument(
             'fsm_executable', default_value='mission_fsm',
             description='Which flight node agent_only:=false starts: '
@@ -790,6 +812,24 @@ def generate_launch_description():
                         'and the RealSense takes video0-5, so an index opens a '
                         'RealSense node and can steal it from the RealSense '
                         'driver. Empty = fall back to the index.'),
+        DeclareLaunchArgument(
+            'line_detect', default_value='true',
+            description='floor_line: the floral carpet strip under the down '
+                        'camera, which mission_fsm_full flies the straight '
+                        'leg along (follow_line:=false ignores it).'),
+        DeclareLaunchArgument(
+            'line_stream_port', default_value='8082',
+            description='Browser view of the carpet detection: '
+                        'http://<jetson>:8082/ (0 = off). aruco_pose is on '
+                        '8080, window_detect on 8081.'),
+        DeclareLaunchArgument('line_sat_min', default_value='60',
+                              description='HSV saturation: carpet vs grey floor'),
+        DeclareLaunchArgument('line_min_width', default_value='0.35'),
+        DeclareLaunchArgument('line_max_width', default_value='1.60'),
+        DeclareLaunchArgument(
+            'pad_image_topic', default_value='/image_raw',
+            description='Down camera frames from imav_bringup (usb_cam on the '
+                        'C920). Empty = open pad_camera_device directly.'),
         DeclareLaunchArgument('pad_camera_index', default_value='1',
                               description='cv2.VideoCapture index of the '
                                           'down-facing camera.'),
@@ -828,13 +868,10 @@ def generate_launch_description():
         # ---- forwarded into the include unchanged.                     ----
         DeclareLaunchArgument(
             'flight', default_value='true',
-            description='false = camera side only: no DDS agent, no flight '
-                        'node, no doll node. The bench test.'),
+            description='false = detector only: no flight node, '
+                        'no doll node. The bench test.'),
         DeclareLaunchArgument('detect', default_value='true',
                               description='Start window_detect.'),
-        DeclareLaunchArgument('camera', default_value='true',
-                              description='Start realsense2_camera. false if '
-                                          'it is already running.'),
         DeclareLaunchArgument('dolls', default_value='true',
                               description='Start the doll detector.'),
         DeclareLaunchArgument('qgc', default_value='true',
@@ -921,7 +958,15 @@ def generate_launch_description():
             description='Hard clock from the start of the climb. TWICE the '
                         'single-traversal default: two approaches, two '
                         'traversals and a six-leg pattern do not fit in 150 s.'),
-        DeclareLaunchArgument('request_offboard_from_ros', default_value='true'),
+        DeclareLaunchArgument(
+            'request_offboard_from_ros', default_value='false',
+            description='false = YOU switch Offboard, from the transmitter or '
+                        'the imav_bringup dashboard. true = the node asks PX4 '
+                        'itself (bench use, no TX).'),
+        DeclareLaunchArgument(
+            'arm_from_ros', default_value='false',
+            description='false = YOU arm, from the transmitter or the '
+                        'dashboard; the node waits, with no timeout.'),
         DeclareLaunchArgument('standoff_distance', default_value='1.67'),
         DeclareLaunchArgument(
             'inside_distance', default_value='0.80',
@@ -1086,6 +1131,7 @@ def generate_launch_description():
 
         support,
         aruco_node,
+        line_node,
         doll_text_node,
         flight_node,
     ])

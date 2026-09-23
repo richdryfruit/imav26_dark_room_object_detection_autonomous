@@ -145,6 +145,14 @@ class LidarRoomScan:
                                         # earlier and its own settling reads
                                         # as drift.
 
+    # Close the in-room position loop on the lidar itself: every arena goal
+    # becomes (EKF2 position when the fix arrived) + (goal - fix), rotated
+    # into NED. EKF2's drift then cancels exactly instead of being chased by
+    # the low-passed transform (whose ~2.5 s lag is what let a yaw in place
+    # walk the aircraft sideways). Off by default: the full mission keeps the
+    # transform-only behaviour it was tuned on.
+    LIDAR_CLOSED_LOOP = False
+
     LIDAR_ODOM_TOPIC = '/lidar/odom_kf'
     LIDAR_STATUS_TOPIC = '/lidar/loc_status'
 
@@ -212,6 +220,8 @@ class LidarRoomScan:
         self.LIDAR_MAX_VARIANCE = float(self._declare_number(
             'lidar_max_variance', self.LIDAR_MAX_VARIANCE))
         self.lidar_rejected = 0
+        self.LIDAR_CLOSED_LOOP = bool(self.declare_parameter(
+            'lidar_closed_loop', self.LIDAR_CLOSED_LOOP).value)
         self.TRANSFORM_LATCH_SECONDS = float(self._declare_number(
             'latch_sec', self.TRANSFORM_LATCH_SECONDS))
         self.LIDAR_ODOM_TOPIC = str(self.declare_parameter(
@@ -220,6 +230,7 @@ class LidarRoomScan:
         # (x, y, z, yaw) in the arena frame, newest lidar fix.
         self.lidar_fix = None
         self.lidar_fix_time = None
+        self.lidar_fix_ekf = None       # EKF2 (N, E) when that fix arrived
         self.lidar_status = ''
         # (theta, tx, ty, tz): arena -> ENU, low-passed. See update_transform.
         self.arena_tf = None
@@ -283,6 +294,9 @@ class LidarRoomScan:
         x, y, yaw = self._relabel(x, y, yaw)
         self.lidar_fix = (x, y, float(p.z), yaw)
         self.lidar_fix_time = self._now()
+        lp = getattr(self, 'local_position', None)
+        self.lidar_fix_ekf = (None if lp is None or not lp.xy_valid
+                              else (float(lp.x), float(lp.y)))
 
     def lidar_status_callback(self, msg):
         self.lidar_status = msg.data
@@ -387,6 +401,9 @@ class LidarRoomScan:
 
     def arena_to_ned(self, x, y, z=None):
         """Arena point -> EKF2 local NED, for a TrajectorySetpoint."""
+        if (self.LIDAR_CLOSED_LOOP and z is None
+                and self.lidar_fix_ekf is not None and self.lidar_fix_is_fresh()):
+            return self.lidar_goal_ned(x, y)
         th, tx, ty, tz = self.arena_tf
         c, s = math.cos(th), math.sin(th)
         e = c * x - s * y + tx
@@ -394,6 +411,28 @@ class LidarRoomScan:
         if z is None:
             return n, e, None
         return n, e, -(z + tz)
+
+    def lidar_goal_ned(self, x, y):
+        """Arena goal -> NED, closed on the newest lidar fix.
+
+        Only the ROTATION of the transform is used (it is set by the IMU yaw
+        both streams share, so it does not drift); the translation is the
+        lidar's own measured error, added to where EKF2 put the aircraft at
+        the moment that fix was taken. Whatever EKF2 has drifted since the
+        room was entered appears on both sides and cancels.
+        """
+        th = self.arena_tf[0]
+        c, s = math.cos(th), math.sin(th)
+        ex = x - self.lidar_fix[0]
+        ey = y - self.lidar_fix[1]
+        n0, e0 = self.lidar_fix_ekf
+        return n0 + s * ex + c * ey, e0 + c * ex - s * ey, None
+
+    def lidar_error(self, x, y):
+        """Metres from the newest lidar fix to an arena point, or None."""
+        if self.lidar_fix is None or not self.lidar_fix_is_fresh():
+            return None
+        return math.hypot(x - self.lidar_fix[0], y - self.lidar_fix[1])
 
     def ned_to_arena(self, n, e):
         """The inverse, for reporting where the aircraft actually is."""

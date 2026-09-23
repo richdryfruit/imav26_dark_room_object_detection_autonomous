@@ -1,4 +1,4 @@
-"""mission_fsm_part2's 'retrace' exit: no camera relock from inside."""
+"""mission_fsm_part2's 'retrace' exit (the fallback; 'detect' is the default)."""
 import time
 
 import pytest
@@ -44,8 +44,8 @@ def fsm():
     n.destroy_node()
 
 
-def test_exit_mode_defaults_to_retrace(fsm):
-    assert fsm.EXIT_MODE == 'retrace'
+def test_exit_mode_defaults_to_detect_and_keeps_the_retrace_leg(fsm):
+    assert fsm.EXIT_MODE == 'detect'
     leg = fsm.legs[fsm.leg_by_name['exit']]
     assert leg.direction == 'backward' and leg.marker_id is None
     assert leg.distance == pytest.approx(fsm.INSIDE_DISTANCE + fsm.OUTSIDE_DISTANCE)
@@ -57,6 +57,7 @@ def test_retrace_returns_to_the_inbound_height_then_flies_out(fsm):
     fsm.inbound_z = -1.95
     fsm.inbound_hagl = 1.95                 # TFmini floor distance inbound
     fsm.local_position.dist_bottom = 1.75   # floor distance now (EKF says 1.75)
+    fsm.EXIT_MODE = 'retrace'
     fsm._begin_relock()
     assert fsm.phase == fsm.PHASE_OUT
     assert fsm.current_stage == fsm.ALT_CHANGE

@@ -314,6 +314,12 @@ def imgmsg_to_bgr(msg):
     change instead of a parameter.
     """
     enc = msg.encoding.lower()
+    if enc in ('yuv422_yuy2', 'yuyv'):
+        # usb_cam's pixel_format "yuyv" (the C920 under imav_bringup):
+        # 2 bytes a pixel, Y0 U Y1 V.
+        raw = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.step)
+        yuyv = raw[:, :msg.width * 2].reshape(msg.height, msg.width, 2)
+        return cv2.cvtColor(np.ascontiguousarray(yuyv), cv2.COLOR_YUV2BGR_YUY2)
     array = imgmsg_to_array(msg)
 
     if enc in ('bgr8', '8uc3'):

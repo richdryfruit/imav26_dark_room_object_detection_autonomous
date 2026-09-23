@@ -1,0 +1,4 @@
+# Nothing: the default for mission_fsm.launch.py hw_params.
+/**:
+  ros__parameters:
+    hw_params_file: none

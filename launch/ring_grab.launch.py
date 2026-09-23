@@ -1,11 +1,11 @@
 """
 Take off, find the ArUco ring board, fly through the ring, come back, land.
 
-    # 1. TROUBLESHOOTING FIRST. No agent, no flight node, camera only.
+    # 1. TROUBLESHOOTING FIRST. No flight node, detector only.
     ros2 launch drone_testing ring_grab.launch.py flight:=false
     ros2 run drone_testing ring_grab --ros-args -p mode:=pose
 
-    # 2. THE FLIGHT. agent + camera + detector from launch, flight by hand.
+    # 2. THE FLIGHT. detector from launch, flight by hand.
     ros2 launch drone_testing ring_grab.launch.py
     ros2 run drone_testing ring_grab --ros-args -p mode:=grab
 
@@ -36,10 +36,8 @@ mode:=grab flies:
 
 WHAT THIS STARTS
 ----------------
-    uXRCE-DDS agent     as a bare process, not the micro_ros_agent node --
-                        same as window_traverse.launch.py, because the ROS
-                        package is not installed on this Jetson.
-    realsense2_camera   COLOUR ONLY. See below.
+    ring_detect and (optionally) ring_grab. The uXRCE-DDS agent and the
+    RealSense come from imav_bringup; start that first.
     ring_detect         the ArUco pipeline. Browser view on port 8080.
     ring_grab           the flight, unless agent_only:=true (the default).
 
@@ -47,14 +45,9 @@ COLOUR ONLY, AND WHY THERE IS NO DEPTH HERE
 --------------------------------------------
 window_traverse needs align_depth because an HSV blob has no scale. A marker
 has one: the edge length is known, so four corners plus the camera matrix are
-a complete range measurement and solvePnP returns metres directly. So depth,
-the aligned-depth topic, the pointcloud, the infra streams and the IMU are all
-off. On a USB3 bus shared with the flight controller that is bandwidth spent
-on nobody, and the IR emitter is left off for the same reason -- it does
-nothing for a passive colour detection.
-
-If you turn depth on for some other reason, note that align_depth is still not
-needed by anything in this mission.
+a complete range measurement and solvePnP returns metres directly. This
+mission reads only the colour image, which imav_bringup's VIO stack publishes
+when started with enable_color:=true.
 
 THE NUMBERS THAT MUST BE RIGHT BEFORE THIS FLIES
 -------------------------------------------------
@@ -86,67 +79,15 @@ controller first, or cs_rng_kin_consistent will refuse the arm.
 """
 
 from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, ExecuteProcess, GroupAction,
-                            IncludeLaunchDescription, TimerAction)
+from launch.actions import DeclareLaunchArgument, GroupAction, TimerAction
 from launch.conditions import IfCondition, UnlessCondition
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
     agent_only = LaunchConfiguration('agent_only')
     flight = LaunchConfiguration('flight')
-
-    # Started as a bare process rather than a micro_ros_agent Node: the ROS
-    # package is not installed on this Jetson, the agent built from source
-    # lives at /usr/local/bin/MicroXRCEAgent, and it takes the same arguments.
-    microxrce_node = ExecuteProcess(
-        cmd=[LaunchConfiguration('agent_cmd'), 'serial',
-             '--dev', LaunchConfiguration('agent_dev'),
-             '-b', LaunchConfiguration('agent_baud')],
-        name='micro_xrce_dds_agent',
-        output='screen',
-    )
-
-    # Scoped, non-forwarding, for the same reason window_traverse.launch.py
-    # does it: rs_launch.py warns about every launch configuration it can see
-    # that is not one of its own, and IncludeLaunchDescription forwards the
-    # parent's by default, which buries the startup log. forwarding=False
-    # means anything the include needs has to be mapped in here explicitly.
-    realsense = GroupAction(
-        scoped=True,
-        forwarding=False,
-        launch_configurations={
-            'camera_name': LaunchConfiguration('camera_name'),
-            'camera_namespace': LaunchConfiguration('camera_namespace'),
-            'rgb_camera.color_profile': LaunchConfiguration('color_profile'),
-        },
-        condition=IfCondition(LaunchConfiguration('camera')),
-        actions=[
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(PathJoinSubstitution([
-                    FindPackageShare('realsense2_camera'),
-                    'launch', 'rs_launch.py'])),
-                launch_arguments={
-                    'enable_color': 'true',
-                    # Everything else off. solvePnP needs one calibrated
-                    # colour image and nothing more; see the header.
-                    'enable_depth': 'false',
-                    'align_depth.enable': 'false',
-                    'enable_infra1': 'false',
-                    'enable_infra2': 'false',
-                    'enable_gyro': 'false',
-                    'enable_accel': 'false',
-                    'pointcloud.enable': 'false',
-                    # PX4 is the navigation authority on this vehicle; the
-                    # camera must not publish a competing odom -> base_link.
-                    'publish_tf': 'false',
-                }.items(),
-            ),
-        ],
-    )
 
     # The detector. Ahead of the flight node so the camera has opened and
     # /ring_detected is already being published by the time the sweep asks it
@@ -273,20 +214,16 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'agent_only', default_value='true',
-            description='Start the agent, the camera and the detector but not '
+            description='Start the detector but not '
                         'the flight node, so you can run that by hand and keep '
                         'the q/k keyboard aborts. false = fly the whole thing.'),
         DeclareLaunchArgument(
             'flight', default_value='true',
-            description='false = camera and detector only: no DDS agent, no '
+            description='false = detector only: no '
                         'flight node. This is the bench setup.'),
         DeclareLaunchArgument(
             'detect', default_value='true',
             description='Start ring_detect.'),
-        DeclareLaunchArgument(
-            'camera', default_value='true',
-            description='Start realsense2_camera. false if it is already up -- '
-                        'librealsense will refuse a second claim on the device.'),
 
         # ---- mode ----
         DeclareLaunchArgument(
@@ -319,7 +256,7 @@ def generate_launch_description():
                         'whatever else is happening. The backstop that '
                         'outranks every stage.'),
         DeclareLaunchArgument(
-            'request_offboard_from_ros', default_value='true',
+            'request_offboard_from_ros', default_value='false',
             description='false = you flip the Offboard switch on the TX.'),
 
         # ---- the search ----
@@ -497,16 +434,7 @@ def generate_launch_description():
         DeclareLaunchArgument('stream_scale', default_value='0.6'),
         DeclareLaunchArgument('jpeg_quality', default_value='70'),
 
-        # ---- the camera, and where it is bolted ----
-        DeclareLaunchArgument('camera_name', default_value='camera'),
-        DeclareLaunchArgument(
-            'camera_namespace', default_value='camera',
-            description='With camera_name this is what makes the topics '
-                        '/camera/camera/...'),
-        DeclareLaunchArgument(
-            'color_profile', default_value='1280,720,30',
-            description="The D435i's native colour mode. Anything else makes "
-                        'librealsense rescale for nothing.'),
+        # ---- where the camera is bolted ----
         DeclareLaunchArgument(
             'cam_x', default_value='0.0',
             description='Camera position in the body frame, ROS convention '
@@ -521,14 +449,6 @@ def generate_launch_description():
         DeclareLaunchArgument('cam_pitch', default_value='0.0'),
         DeclareLaunchArgument('cam_yaw', default_value='0.0'),
 
-        # ---- the agent ----
-        DeclareLaunchArgument(
-            'agent_cmd', default_value='MicroXRCEAgent',
-            description='The uXRCE-DDS agent binary. Built from source on this '
-                        'Jetson at /usr/local/bin/MicroXRCEAgent.'),
-        DeclareLaunchArgument('agent_dev', default_value='/dev/ttyTHS1'),
-        DeclareLaunchArgument('agent_baud', default_value='921600'),
-
         # ---- the rest ----
         DeclareLaunchArgument(
             'flight_node_delay', default_value='12.0',
@@ -542,8 +462,7 @@ def generate_launch_description():
         # flight:=false leaves the camera side running on its own, which is the
         # bench setup. Grouped rather than conditioned individually because two
         # of these already carry a condition of their own.
-        GroupAction([microxrce_node, lcd_node, grab_node],
+        GroupAction([lcd_node, grab_node],
                     condition=IfCondition(flight)),
-        realsense,
         detect_node,
     ])

@@ -26,14 +26,16 @@ class DroneController(Node):
         )
         
         # --- Publishers ---
-        self.offboard_control_mode_pub = self.create_publisher(OffboardControlMode, '/fmu/in/offboard_control_mode', 10)
-        self.vehicle_command_pub = self.create_publisher(VehicleCommand, '/fmu/in/vehicle_command', 10)
-        self.trajectory_setpoint_pub = self.create_publisher(TrajectorySetpoint, '/fmu/in/trajectory_setpoint', 10)
+        self.offboard_control_mode_pub = self.create_publisher(OffboardControlMode, '/uav_2/fmu/in/offboard_control_mode', 10)
+        self.vehicle_command_pub = self.create_publisher(VehicleCommand, '/uav_2/fmu/in/vehicle_command', 10)
+        self.trajectory_setpoint_pub = self.create_publisher(TrajectorySetpoint, '/uav_2/fmu/in/trajectory_setpoint', 10)
+        self.vehicle_command_pub = self.create_publisher(VehicleCommand, '/uav_2/fmu/in/vehicle_command', 10)
+        self.trajectory_setpoint_pub = self.create_publisher(TrajectorySetpoint, '/uav_2/fmu/in/trajectory_setpoint', 10)
 
         # --- Subscribers ---
         self.vehicle_status_subs = subscribe_versioned(self, VehicleStatus, 'vehicle_status', self.vehicle_status_callback, qos_profile)
         self.local_position_subs = subscribe_versioned(self, VehicleLocalPosition, 'vehicle_local_position', self.local_position_callback, qos_profile)
-        self.local_orienation_sub = self.create_subscription(VehicleAttitude, '/fmu/out/vehicle_attitude', self.local_orientation_callback, qos_profile=qos_profile)
+        self.local_orienation_sub = self.create_subscription(VehicleAttitude, '/uav_2/fmu/out/vehicle_attitude', self.local_orientation_callback, qos_profile=qos_profile)
         self.joystick_sub = self.create_subscription(Joy, '/joy',self.joystick_callback, 10)
 
         # --- State Variables ---
@@ -423,7 +425,7 @@ class DroneController(Node):
         
         if self.arming_state != VehicleStatus.ARMING_STATE_ARMED:
             if time.time() % 2 < 0.1:
-                self.get_logger().info('Drone not armed... Press Y button to arm.')
+                self.get_logger().info('Drone not armed... Waiting for external arm.')
             if self.buttons[self.Y_BUTTON] == 1:
                 self.get_logger().info('Arming the drone...')
                 self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0)

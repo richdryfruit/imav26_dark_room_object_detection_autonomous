@@ -10,9 +10,10 @@ The support stack is NOT re-implemented here. This file INCLUDES
 window_traverse.launch.py -- the one that works -- with agent_only:=true, so
 that file brings up exactly what it always brings up:
 
-    the uXRCE-DDS agent, the RealSense D435i (colour + depth + the aligned
-    depth topic), the emitter parameter set after the driver is up, and
     window_detect with the same HSV/geometry configuration
+
+(the uXRCE-DDS agent and the RealSense D435i -- colour + aligned depth -- come
+from imav_bringup, which must already be running)
 
 and does NOT bring up its own flight node. Every camera and detector argument
 below is forwarded into that include, so there is one definition of each and
@@ -82,7 +83,7 @@ estimate before flying it. Read it. In addition:
    (x forward, y left, z up). Get them wrong and the window is misplaced by
    the offset AND every doll is, which merges dolls that are not the same one.
 
-4. MERGE RADIUS. doll_merge_radius (0.60 m) is what makes two sightings the
+4. MERGE RADIUS. doll_merge_radius (0.20 m) is what makes two sightings the
    same doll. It must be smaller than the smallest gap between two real dolls
    and bigger than the position error. Measure the gap in your arena; if the
    dolls are closer together than about a metre, lower it and expect the count
@@ -100,8 +101,8 @@ USEFUL VARIATIONS
                                   ground included. This is how you bench the
                                   model and the geotagging without flying.
     display:=false                no Arduino.
-    flight:=false                 camera and detector only, no agent, no
-                                  flight node: the bench test.
+    flight:=false                 detector only, no flight node: the
+                                  bench test.
 """
 
 from launch import LaunchDescription
@@ -149,7 +150,6 @@ def generate_launch_description():
             'agent_only': 'true',
             'flight': LaunchConfiguration('flight'),
             'detect': LaunchConfiguration('detect'),
-            'camera': LaunchConfiguration('camera'),
             # The old six-row sketch's bridge. Off: this mission's board runs
             # room_status.ino and room_display below. Pinned rather than
             # forwarded so `lcd:=true` cannot start a node that would fight
@@ -298,9 +298,22 @@ def generate_launch_description():
                 parameters=[dict(camera_mounting, **{
                     'model_path': LaunchConfiguration('doll_model'),
                     'tracker_path': LaunchConfiguration('doll_tracker'),
-                    'image_topic': LaunchConfiguration('image_topic'),
+                    # The dolls are on the floor: the DOWNWARD C920
+                    # (imav_bringup's usb_cam), not the level RealSense. Its
+                    # own mounting, overriding camera_mounting above.
+                    'image_topic': LaunchConfiguration('doll_image_topic'),
                     'depth_topic': LaunchConfiguration('depth_topic'),
-                    'camera_info_topic': LaunchConfiguration('camera_info_topic'),
+                    'camera_info_topic': LaunchConfiguration('doll_camera_info_topic'),
+                    'depth_source': LaunchConfiguration('doll_depth_source'),
+                    'target_height': LaunchConfiguration('doll_target_height'),
+                    'hfov_deg': LaunchConfiguration('doll_hfov_deg'),
+                    'geotag_frame': LaunchConfiguration('doll_geotag_frame'),
+                    'cam_x': LaunchConfiguration('doll_cam_x'),
+                    'cam_y': LaunchConfiguration('doll_cam_y'),
+                    'cam_z': LaunchConfiguration('doll_cam_z'),
+                    'cam_roll': 0.0,
+                    'cam_pitch': LaunchConfiguration('doll_cam_pitch'),
+                    'cam_yaw': 0.0,
                     'confidence': LaunchConfiguration('doll_confidence'),
                     'min_frames_to_confirm': LaunchConfiguration(
                         'doll_min_frames'),
@@ -379,13 +392,10 @@ def generate_launch_description():
                         'aborts. false = fly the whole mission from here.'),
         DeclareLaunchArgument(
             'flight', default_value='true',
-            description='false = camera side only: no DDS agent, no flight '
-                        'node, no doll node. The bench test.'),
+            description='false = detector only: no flight node, '
+                        'no doll node. The bench test.'),
         DeclareLaunchArgument('detect', default_value='true',
                               description='Start window_detect.'),
-        DeclareLaunchArgument('camera', default_value='true',
-                              description='Start realsense2_camera. false if '
-                                          'it is already running.'),
         DeclareLaunchArgument('dolls', default_value='true',
                               description='Start the doll detector.'),
         DeclareLaunchArgument('qgc', default_value='true',
@@ -469,7 +479,7 @@ def generate_launch_description():
             description='Hard clock from the start of the climb. TWICE the '
                         'single-traversal default: two approaches, two '
                         'traversals and a six-leg pattern do not fit in 150 s.'),
-        DeclareLaunchArgument('request_offboard_from_ros', default_value='true'),
+        DeclareLaunchArgument('request_offboard_from_ros', default_value='false'),
 
         # ---- the two traversals ----
         DeclareLaunchArgument('standoff_distance', default_value='2.0'),
@@ -600,8 +610,37 @@ def generate_launch_description():
             description='Inference rate cap. The thing that must not be '
                         'starved on this Jetson is the flight node\'s 20 Hz '
                         'setpoint timer, and a doll does not move.'),
+        DeclareLaunchArgument('doll_image_topic', default_value='/image_raw',
+                              description='The downward C920 (usb_cam).'),
+        DeclareLaunchArgument('doll_camera_info_topic', default_value='/camera_info'),
         DeclareLaunchArgument(
-            'doll_merge_radius', default_value='0.60',
+            'doll_depth_source', default_value='rangefinder',
+            description='rangefinder: z-depth = camera height (TFmini minus '
+                        'the lens offset) minus doll_target_height.'),
+        DeclareLaunchArgument(
+            'doll_target_height', default_value='0.10',
+            description='m. Height above the FLOOR of the part of the doll the '
+                        'detector box centres on (about half its height as it '
+                        'lies/stands). Only scales range: 5 cm wrong at 1.75 m '
+                        'moves a doll 1 m off-centre by ~3 cm.'),
+        DeclareLaunchArgument(
+            'doll_hfov_deg', default_value='70.4',
+            description='C920 horizontal FOV, used when its CameraInfo is '
+                        'uncalibrated (usb_cam without a calibration file).'),
+        DeclareLaunchArgument(
+            'doll_geotag_frame', default_value='arena',
+            description='arena = tag in the lidar room frame (/lidar/odom_kf); '
+                        'ned = EKF2 local frame.'),
+        DeclareLaunchArgument('doll_cam_x', default_value='0.0'),
+        DeclareLaunchArgument('doll_cam_y', default_value='0.0'),
+        DeclareLaunchArgument(
+            'doll_cam_z', default_value='-0.075',
+            description='m, ROS z-up: the C920 is 7-8 cm BELOW the body centre.'),
+        DeclareLaunchArgument(
+            'doll_cam_pitch', default_value='1.5708',
+            description='+90 deg = optical axis straight down, image-up = nose.'),
+        DeclareLaunchArgument(
+            'doll_merge_radius', default_value='0.20',
             description='m. Two detections this close together IN THE ROOM '
                         'are the same doll. Smaller than the smallest gap '
                         'between two real dolls, bigger than the position '

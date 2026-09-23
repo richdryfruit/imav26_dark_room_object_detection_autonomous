@@ -20,8 +20,8 @@ else. It keeps working across a reflash, which is the point.
 
 def versioned_names(base, max_version=4):
     """Every plausible /fmu/out spelling of ``base``, unversioned first."""
-    return [f'/fmu/out/{base}'] + [
-        f'/fmu/out/{base}_v{n}' for n in range(1, max_version + 1)
+    return [f'/uav_2/fmu/out/{base}'] + [
+        f'/uav_2/fmu/out/{base}_v{n}' for n in range(1, max_version + 1)
     ]
 
 

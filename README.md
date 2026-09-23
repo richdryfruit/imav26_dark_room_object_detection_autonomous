@@ -1,6 +1,17 @@
 # drone_testing
 
+> **Flying it?** `HARDWARE_RUN.md` is the run sheet: PX4 parameters, the
+> terminal-by-terminal commands for `mission_fsm_part1` / `part2` / `full`,
+> every ros-arg worth changing, the doll count, the SITL equivalents, and
+> what to do when something stops the flight. THE PILOT ARMS: the flight
+> nodes never switch Offboard and never arm; you do, from the transmitter or
+> the imav_bringup dashboard.
+
+
 > **Mission split into two flights** (straight leg → marker; window + dark room → back to the marker), for the real drone and in SITL: see **[MISSION_PARTS.md](MISSION_PARTS.md)**.
+
+> **All the terminal commands, for every flight node, on one page: [LAUNCH_COMMANDS.md](LAUNCH_COMMANDS.md).**
+
 
 ROS 2 package for autonomous offboard flight on a PX4 vehicle, running on a
 Jetson companion computer.
@@ -39,6 +50,81 @@ a window with the D435i, lines up square in front of it and flies through;
 moves you give it, back to the window from the inside, out through it, and
 optionally running the TensorRT doll model the whole time and putting a live
 count in QGroundControl.
+
+---
+
+## How to run anything: imav_bringup first, then the flight node
+
+**The DDS agent and the cameras no longer come from this package.**
+`imav_bringup` (in `~/imav26_final/imav26_ws`) starts them once, for every
+flight. No launch file here starts `MicroXRCEAgent` or `realsense2_camera`
+any more (except `sitl.launch.py`, see below).
+
+**Everything that talks to PX4 is still the flight node's job:** the Offboard
+heartbeat (`offboard_control_mode`), the setpoints, the request for Offboard,
+arming, disarming, the force-disarm and the landing. `imav_bringup` does not
+send PX4 anything. If the flight node dies, its heartbeat stops and PX4 takes
+the aircraft back, which is the point.
+
+**PX4's topics are under `/uav_2`.** The FC has `UXRCE_DDS_NS=uav_2`, so its
+topics are `/uav_2/fmu/in/...` and `/uav_2/fmu/out/...`, and every node here
+uses those names (hard-coded). If a node sits on
+`Waiting for VehicleStatus from PX4...`, check `ros2 topic list | grep fmu`
+shows `/uav_2/fmu/...`.
+
+### The panes
+
+| pane | what | needed for |
+|---|---|---|
+| **0** | `ros2 launch imav_bringup bringup.launch.py` — DDS agent, RealSense, webcam, zenoh, jetson_stats. Leave it running all session. | **every** flight |
+| **1** | this package's `*.launch.py` for the mission — now only the helper nodes (detectors, displays, LCD) | only where the table below says so |
+| **2** | the flight node, `ros2 run drone_testing <node> --ros-args ...` | every flight. `ros2 run` in its own pane keeps stdin a tty, so the `q` / `k` aborts work |
+
+```bash
+# pane 0 (once per session)
+source ~/imav26_final/imav26_ws/install/setup.bash
+ros2 launch imav_bringup bringup.launch.py
+```
+
+What pane 1 still starts, per launch file (`agent_only:=true`, the default,
+means "do not start the flight node"; `agent_only:=false` starts it from the
+launch too, without the `q` / `k` aborts):
+
+| launch file | pane 1 starts | need pane 1? |
+|---|---|---|
+| `takeoff_test`, `translate_test`, `sequence_test` | only the LCD (`lcd:=true`) | **no**, unless you want the LCD |
+| `arm_test` | nothing but the flight node | **no** |
+| `window_scan`, `window_traverse` | `window_detect` (+ LCD, + `fc_reboot` if `reboot_fc:=true`) | **yes** |
+| `window_room_traverse`, `darkroom_launch` | `window_detect`, `doll_detect`, `room_display`, `qgc_doll_status` (+ exposure lock for the dark room) | **yes** |
+| `mission_fsm`, `mission_fsm_part1`, `mission_fsm_part2` | all of the above + `aruco_pose` + `doll_report_text` | **yes** |
+| `precision_land` | `aruco_pose` (+ LCD) | **yes** |
+| `ring_grab` | `ring_detect` | **yes** |
+| `sequence_vio_realsense` | LCD only; the VIO comes from imav_bringup | **no**, but see 6e |
+
+### The camera: set `vio.enabled` in imav_bringup
+
+In `~/imav26_final/imav26_ws/src/imav_bringup/config/params.yaml`:
+
+- `vio.enabled: false` — the RealSense runs **colour only, no depth**. Fine
+  for takeoff / translate / sequence / precision_land / arm_test.
+- `vio.enabled: true` — the RealSense runs through the RTAB-Map VIO stack
+  with **colour + aligned depth** (`vio.extra_args`, which also carries the
+  camera mounting `cam_x` ...). **Required** for `window_detect`,
+  `doll_detect`, `window_*`, `darkroom`, `mission_fsm*` and
+  `sequence_vio_realsense`: they read
+  `/camera/camera/aligned_depth_to_color`.
+
+Restart pane 0 after changing it. **Only one RealSense driver may run**:
+stop any other camera launch (e.g. a stray `rs_launch.py` or
+`dual_cam_launch.py`) before starting pane 0, or the SDK refuses the device
+and it looks like a dead camera.
+
+### SITL
+
+`sitl.launch.py` is the exception: it still starts its own (UDP) agent and
+the simulated cameras, and does not use imav_bringup. It starts PX4 with
+`PX4_UXRCE_DDS_NS=uav_2` so the sim's topics have the same `/uav_2` prefix as
+the aircraft. Check the first `ros2 topic list` in SITL shows `/uav_2/fmu/...`.
 
 ---
 
@@ -152,7 +238,7 @@ just `cd` to wherever your `src/` actually is:
 
 ```bash
 sudo apt install ros-jazzy-desktop python3-colcon-common-extensions
-sudo apt install ros-jazzy-micro-ros-agent       # or build micro-XRCE-DDS-Agent from source
+# the uXRCE-DDS agent (MicroXRCEAgent) is started by imav_bringup, not by this package
 pip3 install pyserial pymavlink
 ```
 
@@ -289,6 +375,8 @@ uXRCE-DDS client at a matching baud rate (921600 here):
 
 - `UXRCE_DDS_CFG` → the TELEM port you are using
 - `SER_TEL2_BAUD` (or whichever port) → 921600
+- `UXRCE_DDS_NS` → `uav_2` (the topic prefix every node here expects; must
+  match `vehicle_namespace` in imav_bringup's `params.yaml`)
 
 ---
 
@@ -323,20 +411,20 @@ echo 'source ~/imav26-ws-2/ws_ros2/install/setup.bash' >> ~/.bashrc
 
 ## 3. Verify the link before you fly
 
-Start the DDS agent on its own and confirm PX4 topics appear.
+Start imav_bringup (it runs the DDS agent) and confirm PX4 topics appear.
 
-**Terminal 1 — agent only (this is the default):**
+**Terminal 1 — imav_bringup:**
 
 ```bash
-ros2 launch drone_testing takeoff_test.launch.py
+ros2 launch imav_bringup bringup.launch.py
 ```
 
 **Terminal 2 — check:**
 
 ```bash
-ros2 topic list | grep /fmu/
-ros2 topic echo /fmu/out/vehicle_status_v1 --once   # unversioned on some builds
-ros2 topic echo /fmu/out/vehicle_local_position --once
+ros2 topic list | grep /uav_2/fmu/
+ros2 topic echo /uav_2/fmu/out/vehicle_status_v1 --once   # unversioned on some builds
+ros2 topic echo /uav_2/fmu/out/vehicle_local_position_v1 --once   # unversioned on some builds
 ```
 
 In that last message you want to see, **props off, on the ground**:
@@ -358,15 +446,18 @@ If they are false, fix the sensor before going further — the log line
 
 ### The recommended way (keyboard aborts stay live)
 
-Run the agent from the launch file and the flight node **by hand in a second
-pane**. Launching the node through `ros2 launch` means its stdin is not a tty,
+Run imav_bringup in one pane and the flight node **by hand in another**.
+Launching the node through `ros2 launch` means its stdin is not a tty,
 which kills the `q` / `k` keyboard aborts.
 
-**Pane 1:**
+**Pane 0:**
 
 ```bash
-ros2 launch drone_testing takeoff_test.launch.py
+ros2 launch imav_bringup bringup.launch.py
 ```
+
+(`ros2 launch drone_testing takeoff_test.launch.py` is no longer needed: it
+now starts only the optional LCD, `lcd:=true`.)
 
 **Pane 2:**
 
@@ -394,7 +485,8 @@ Flipping the TX out of Offboard also makes the node stand down and let go.
 
 ### Everything from one launch file
 
-If you accept losing the keyboard aborts:
+If you accept losing the keyboard aborts (imav_bringup still has to be
+running):
 
 ```bash
 ros2 launch drone_testing takeoff_test.launch.py \
@@ -407,14 +499,14 @@ ros2 launch drone_testing takeoff_test.launch.py \
 
 | argument                    | default  | meaning                                                        |
 |-----------------------------|----------|----------------------------------------------------------------|
-| `agent_only`                | `true`   | `true` = start only the DDS agent (+ LCD); run the node by hand |
+| `agent_only`                | `true`   | `true` = do not start the flight node (only the LCD if `lcd:=true`); run the node by hand. The agent itself comes from imav_bringup |
 | `takeoff_altitude`          | `0.80`   | metres above the arming point                                   |
 | `hold_seconds`              | `15.0`   | station-keeping time once the altitude is reached               |
 | `ground_wait_seconds`       | `5.0`    | armed on the ground before the climb starts                     |
 | `climb_speed`               | `0.35`   | m/s the climb setpoint ramps at                                 |
 | `land_speed`                | `0.15`   | m/s the descent setpoint ramps at                               |
 | `request_offboard_from_ros` | `true`   | `false` = you flip the Offboard switch on the TX yourself        |
-| `lcd`                       | `true`   | start the Arduino LCD status node                               |
+| `lcd`                       | `false`  | start the Arduino LCD status node                               |
 | `lcd_port`                  | `''`     | Arduino serial port; empty = auto-detect `ttyACM*` / `ttyUSB*`   |
 
 With `request_offboard_from_ros:=false` the node waits **indefinitely** for you
@@ -475,11 +567,9 @@ it is the takeoff node plus two stages.
 
 ### Running it
 
-**Pane 1:**
+**Pane 0:** `ros2 launch imav_bringup bringup.launch.py` (the DDS agent).
 
-```bash
-ros2 launch drone_testing translate_test.launch.py
-```
+**Pane 1 (optional, LCD only):** `ros2 launch drone_testing translate_test.launch.py`
 
 **Pane 2:**
 
@@ -586,11 +676,9 @@ A step is one of:
 
 ### Running it
 
-**Pane 1:**
+**Pane 0:** `ros2 launch imav_bringup bringup.launch.py` (the DDS agent).
 
-```bash
-ros2 launch drone_testing sequence_test.launch.py
-```
+**Pane 1 (optional, LCD only):** `ros2 launch drone_testing sequence_test.launch.py`
 
 **Pane 2:**
 
@@ -807,19 +895,23 @@ the sweep and `WIN LOCK` once it has locked on.
 
 ### Running it
 
-Bench test, no props — camera and detection only, no DDS agent and no
-flight node. This is how you tune the HSV thresholds:
+The RealSense comes from imav_bringup with `vio.enabled: true` (colour +
+aligned depth) — start pane 0 first.
+
+Bench test, no props — detection only, no flight node. This is how you tune
+the HSV thresholds:
 
 ```bash
 ros2 launch drone_testing window_scan.launch.py flight:=false
 ros2 launch drone_testing window_scan.launch.py flight:=false publish_mask:=true
 ```
 
-Flight. The default starts the agent, the camera and the detector but not the
-flight node, so you run that by hand and keep the `q` / `k` aborts:
+Flight. The default starts the detector (and LCD) but not the flight node, so
+you run that by hand and keep the `q` / `k` aborts:
 
 ```bash
-ros2 launch drone_testing window_scan.launch.py
+ros2 launch imav_bringup bringup.launch.py        # pane 0
+ros2 launch drone_testing window_scan.launch.py   # pane 1
 ros2 run drone_testing window_scan --ros-args \
     -p takeoff_altitude:=1.0 -p flight_seconds:=40.0
 ```
@@ -830,8 +922,8 @@ Everything from the launch file (no keyboard abort — RC kill switch only):
 ros2 launch drone_testing window_scan.launch.py agent_only:=false
 ```
 
-Add `camera:=false` if `realsense2_camera` is already running from somewhere else,
-or you will start a second copy of it and the SDK will refuse the camera.
+The launch file no longer starts `realsense2_camera` (and has no `camera`
+argument): imav_bringup owns the camera. Do not start a second copy.
 
 ### What the flight does
 
@@ -995,8 +1087,8 @@ ros2 run drone_testing precision_land --ros-args \
 Align → hold `aligned_hold_seconds` (10 s) → descend onto the marker.
 
 `agent_only` defaults to **true**, the same as every other launch file here, so
-the support stack comes up from launch and you run the flight node by hand in a
-second pane. That is what keeps stdin a tty, and the `q` / `k` aborts only work
+the launch brings up `aruco_pose` (and the LCD) and you run the flight node by
+hand in a second pane, with imav_bringup running in pane 0. That is what keeps stdin a tty, and the `q` / `k` aborts only work
 when it is. Everything in one shot, with no keyboard abort:
 
 ```bash
@@ -1224,6 +1316,12 @@ detail field carries the stage and the flight clock: `srch 94s` (searching,
 
 ## 6e. The sequence test on ZED vision (`offboard_sequence_vio`)
 
+> **The ZED is gone.** `sequence_vio_test.launch.py` (ZED wrapper + `zed_localization`) was removed.
+> `offboard_sequence_vio` is now flown with `sequence_vio_realsense.launch.py`, on the RealSense +
+> RTAB-Map VIO stack that `imav_bringup` starts (together with the uXRCE-DDS agent). The camera
+> mounting (`cam_x` ...) is set in imav_bringup's `config/params.yaml` (`vio.extra_args`).
+> The rest of this section is the ZED history; the PX4 reasoning still applies.
+
 > **NOT PORTED to the RealSense.** This whole section still describes the ZED.
 > A D435i has no odometry of its own (that was the T265), so running this on
 > the current airframe means standing up RTAB-Map or OpenVINS first and
@@ -1247,7 +1345,7 @@ point and the vehicle goes straight up instead of sliding off. Set
 
 ### Set the PX4 parameters first
 
-Read the header block of `launch/sequence_vio_test.launch.py` — it is the
+Read the header block of `launch/sequence_vio_realsense.launch.py` — it is the
 authority and it explains the reasoning. The minimum, in QGC:
 
 | parameter        | value | why                                              |
@@ -1277,17 +1375,23 @@ EKF2 cannot do because it has no parameter for the camera's *rotation*.
 
 ### Running it
 
-`agent_only` defaults to `true`, so the launch file brings up the support stack
-only — agent, ZED wrapper, bridge, LCD — and you run the flight node yourself
-in a second pane, which is what keeps stdin a tty and the `q`/`k` aborts alive.
+`agent_only` defaults to `true`, so the launch file brings up the LCD only
+(the agent and the VIO come from `imav_bringup`, with `vio.enabled: true`) and
+you run the flight node yourself in a second pane, which is what keeps stdin a
+tty and the `q`/`k` aborts alive.
 
-**Pane 1 — support stack:**
+**Pane 0 — imav_bringup with `vio.enabled: true`:**
 
 ```bash
-cd ~/px4_ros_ws
+ros2 launch imav_bringup bringup.launch.py
+```
+
+**Pane 1 — LCD (optional):**
+
+```bash
+cd ~/imav26-ws-2/ws_ros2
 source install/setup.bash
-ros2 launch drone_testing sequence_vio_test.launch.py \
-  cam_x:=0.10 cam_y:=0.0 cam_z:=0.05 cam_pitch:=0.0
+ros2 launch drone_testing sequence_vio_realsense.launch.py
 ```
 
 Wait for the bridge to print
@@ -1301,15 +1405,15 @@ VIO healthy: 15 Hz from /zed/zed_node/odom
 **Pane 3 — sanity check:**
 
 ```bash
-source ~/px4_ros_ws/install/setup.bash
+source ~/imav26-ws-2/ws_ros2/install/setup.bash
 ros2 topic echo /vio_healthy --once             # must be data: true
-ros2 topic hz /fmu/in/vehicle_visual_odometry   # should sit near 15 Hz
+ros2 topic hz /uav_2/fmu/in/vehicle_visual_odometry   # should sit near 15 Hz
 ```
 
 **Pane 2 — the flight node:**
 
 ```bash
-cd ~/px4_ros_ws
+cd ~/imav26-ws-2/ws_ros2
 source install/setup.bash
 ros2 run drone_testing offboard_sequence_vio --ros-args \
   -p takeoff_altitude:=0.5 \
@@ -1392,10 +1496,13 @@ flow + the TFmini Plus**, fused in PX4 — *not* visual odometry.
 > first. **There is no `EKF2_EV_*` in this flight; clear `EKF2_EV_CTRL` to 0.**
 
 ```bash
-# bench, no props, camera only
+# pane 0, always first: DDS agent + RealSense (params.yaml: vio.enabled: true)
+ros2 launch imav_bringup bringup.launch.py
+
+# bench, no props, detector only
 ros2 launch drone_testing window_traverse.launch.py flight:=false
 
-# flight: support stack from launch, flight node by hand so q/k stay alive
+# flight: detector from launch, flight node by hand so q/k stay alive
 ros2 launch drone_testing window_traverse.launch.py
 ros2 run drone_testing window_traverse --ros-args \
     -p takeoff_altitude:=1.2 -p cam_x:=0.10 -p cam_pitch:=0.0
@@ -1405,7 +1512,7 @@ Three nodes, and one of them is new:
 
 | node              | what it does |
 |-------------------|--------------|
-| `realsense2_camera` | the D435i driver, started by the launch file with `enable_color:=true align_depth.enable:=true` |
+| `realsense2_camera` | the D435i driver, started by **imav_bringup** (with `vio.enabled: true`: colour + aligned depth), not by this launch file |
 | `window_detect`   | the 6c detection, **plus** `/window_geometry`: the four corners and the centre as (depth, azimuth, elevation) in the camera frame |
 | `window_traverse` | the flight. Subclasses `WindowScan` (the sweep and the lock) over `OffboardSequence` (arming, the climb, the ramps, the landing, and `flow_is_healthy`), so the only new flight code is the stages after the lock |
 
@@ -1432,7 +1539,7 @@ ride along with the approach unnoticed.
 ### Which frame the setpoints are in
 
 Every setpoint is an **absolute point in the PX4 local NED frame** — the same
-frame `/fmu/out/vehicle_local_position` reports `x`, `y`, `z` in, z positive
+frame `/uav_2/fmu/out/vehicle_local_position` reports `x`, `y`, `z` in, z positive
 down. Not body-relative. Section 6b hides that behind direction words
 ("forward 1.0"), but underneath it walks an NED hold point towards an NED
 target and publishes that point; this node computes the NED targets directly
@@ -1987,14 +2094,14 @@ there, it logs once and keeps counting quietly.
 
 ### Running it
 
-`agent_only` defaults to **true**, as in every other launch file here: the
-launch brings up the support stack — agent, RealSense, `window_detect`,
-`doll_detect`, `qgc_doll_status`, the TFT — and you run the flight node by hand
-in a second pane, which is what keeps stdin a tty and the `q` / `k` aborts
-alive.
+Pane 0 is imav_bringup with `vio.enabled: true` (DDS agent + RealSense with
+colour and aligned depth). `agent_only` defaults to **true**, as in every
+other launch file here: the launch brings up `window_detect`, `doll_detect`,
+`qgc_doll_status` and the TFT — and you run the flight node by hand in a
+second pane, which is what keeps stdin a tty and the `q` / `k` aborts alive.
 
-**Bench, no props, no agent, no flight node** — camera and window detector
-only, so you can check the detection and walk the window estimate by hand:
+**Bench, no props, no flight node** — window detector only, so you can check
+the detection and walk the window estimate by hand:
 
 ```bash
 ros2 launch drone_testing window_room_traverse.launch.py flight:=false
@@ -2018,10 +2125,10 @@ ros2 topic echo /doll_report
 The `PYTHONPATH` prefix is not optional for a hand-started node — the launch
 file sets it via `doll_venv`, `ros2 run` does not.
 
-The geotag needs `/fmu/out/vehicle_local_position` and
-`/fmu/out/vehicle_attitude`, so with no agent running it will detect and report
-dolls as *visible* but count none. To bench the count, use the default
-`agent_only:=true` launch (which does start the agent) with
+The geotag needs `/uav_2/fmu/out/vehicle_local_position` and
+`/uav_2/fmu/out/vehicle_attitude`, so without imav_bringup (the agent) running it will
+detect and report dolls as *visible* but count none. To bench the count, run
+imav_bringup and the default `agent_only:=true` launch with
 `dolls:=true require_enable:=false`, and carry the airframe around the room by
 hand with the props off.
 
@@ -2086,7 +2193,6 @@ Useful variations:
 | `require_enable:=false` | run the model the whole time, ground included — how you bench it |
 | `qgc:=false` | no MAVLink to QGC |
 | `display:=false` | no Arduino |
-| `camera:=false` | the RealSense is already running from another stack; do not start a second copy (librealsense refuses the device rather than sharing it, and the failure looks like a dead camera) |
 | `flight:=false` | camera and window detector only: the bench test. **Suppresses the doll node as well** — it is grouped with the flight node |
 
 ---
@@ -2217,20 +2323,29 @@ yaw 1.57 -> done; left 0.30 -> TIMED OUT 0.11 m short; outbound done.
 ## 7. Optional: LCD status display
 
 An Arduino running `arduino/tft_status/tft_status.ino` shows the stage, arm
-state and altitude. It is started by default with the launch file:
+state and altitude. It is started by the test launch files (default on for
+`translate_test` / `sequence_test` / `window_scan` / `precision_land`, off for
+`takeoff_test` / `window_traverse` / `ring_grab`):
 
 ```bash
 ros2 launch drone_testing takeoff_test.launch.py lcd:=true lcd_port:=/dev/ttyACM0
 ```
 
-Disable it with `lcd:=false`.
+Disable it with `lcd:=false`. imav_bringup must be running as well.
 
 ---
 
 ## 8. Optional: start at boot via systemd
 
-`drone_testing/px4-agent.service` brings the Jetson up flight-ready: DDS agent
-plus the takeoff node waiting for your Offboard switch.
+`drone_testing/px4-agent.service` starts the takeoff node waiting for your
+Offboard switch.
+
+> **Out of date — fix before enabling.** It runs `takeoff_test.launch.py`,
+> which no longer starts the DDS agent, so it also needs imav_bringup running
+> (e.g. its own unit, ordered `Before=` this one). Its `User=`,
+> `WorkingDirectory=` and paths are still the old Jetson's
+> (`/home/ark-jetson-orin/imav26_ws`); on this one they are
+> `ark-jetson-orin-2` and `~/imav26-ws-2/ws_ros2`.
 
 ```bash
 sudo cp ~/imav26-ws-2/ws_ros2/src/drone_testing/drone_testing/px4-agent.service \
@@ -2287,14 +2402,22 @@ sudo systemctl daemon-reload && sudo systemctl restart px4-agent.service
 
 Other launch files:
 
-- `translate_test.launch.py` — agent + `offboard_translate` (section 6)
-- `sequence_test.launch.py` — agent + `offboard_sequence` (section 6b)
-- `window_scan.launch.py` — agent + RealSense D435i + `window_detect` + `window_scan` (section 6c)
-- `window_traverse.launch.py` — agent + RealSense D435i + `window_detect` + `window_traverse` (section 6f)
+None of these start the uXRCE-DDS agent or the RealSense / VIO stack any more:
+`imav_bringup` (`ros2 launch imav_bringup bringup.launch.py`, in `~/imav26_final/imav26_ws`)
+owns both. Start it first, with `vio.enabled: true` in its `params.yaml`
+whenever a detector needs aligned depth (see "How to run anything" at the top).
+
+- `translate_test.launch.py` — `offboard_translate` (section 6)
+- `sequence_test.launch.py` — `offboard_sequence` (section 6b)
+- `sequence_vio_realsense.launch.py` — `offboard_sequence_vio` on the VIO (section 6e)
+- `window_scan.launch.py` — `window_detect` + `window_scan` (section 6c)
+- `window_traverse.launch.py` — `window_detect` + `window_traverse` (section 6f)
 - `window_room_traverse.launch.py` — includes the above for the support stack, and adds `window_room_traverse` + `doll_detect` + `qgc_doll_status` + `room_display` (section 6g)
-- `precision_land.launch.py` — agent + `aruco_pose` + `precision_land` (section 6d)
-- `arm_test.launch.py` — agent + `offboard_mission`, for arm/disarm bench tests
-- `offboard_launch.launch.py` — agent + ZED localization + `offboard_mission`
+- `darkroom_launch.py`, `mission_fsm*.launch.py` — include `window_room_traverse.launch.py`
+- `precision_land.launch.py` — `aruco_pose` + `precision_land` (section 6d)
+- `ring_grab.launch.py` — `ring_detect` + `ring_grab`
+- `arm_test.launch.py` — `offboard_mission`, for arm/disarm bench tests
+- `sitl.launch.py` — simulation; this one DOES start its own (UDP) agent, and PX4 with `PX4_UXRCE_DDS_NS=uav_2`
 
 ---
 
@@ -2302,7 +2425,7 @@ Other launch files:
 
 | symptom | cause / fix |
 |---|---|
-| `Waiting for VehicleStatus from PX4...` forever | DDS link down. Check the agent is running, the baud is 921600 both ends, `UXRCE_DDS_CFG` is set, and nothing else holds `/dev/ttyTHS1`. |
+| `Waiting for VehicleStatus from PX4...` forever | Either the DDS link is down — check imav_bringup is running (its `uxrce` process), the baud is 921600 both ends, `UXRCE_DDS_CFG` is set, and nothing else holds `/dev/ttyTHS1` — or the topic prefix is wrong: `ros2 topic list \| grep fmu` must show `/uav_2/fmu/...`, i.e. `UXRCE_DDS_NS=uav_2` on the FC. |
 | `Not arming: rangefinder is NOT being fused (cs_rng_kin_consistent false)` | **Reboot the flight controller.** This flag is sticky: EKF2 only updates it while `in_air` is true (`range_height_control.cpp` runs the consistency check inside `if (_control_status.flags.in_air)`), so once it latches false in flight nothing on the ground can clear it. It comes back true at boot. See section 11.1. |
 | `dist_bottom` stuck at exactly `EKF2_MIN_RNG` | The lidar is **not** healthy and EKF2 is synthesising the on-ground value: `_range_sensor.setRange(_params.ekf2_min_rng); setValidity(true)`. That number is not a measurement. `rng_ok=False` in the same log line confirms it. |
 | `Not arming: need z_valid and dist_bottom_valid` | Rangefinder not being fused. Check the ARK Flow wiring and `EKF2_HGT_REF` / `EKF2_RNG_CTRL`. |
@@ -2319,7 +2442,7 @@ Other launch files:
 | The vehicle moves the **wrong way** towards the marker | An axis sign is inverted. Land, and go back to `mode:=bench` (section 6d) — this is exactly what that mode exists to catch. Fix `image_rotate` or the mounting. |
 | Aligns, then oscillates around the marker | `align_gain` too high for the camera latency, or the marker is near the frame edge where the uncorrected lens distortion is worst. Lower `align_gain`, and calibrate the camera. |
 | `window_traverse` never leaves `LOCK` | No usable window pose. The node logs which test is rejecting the samples — read that tally. Usual causes: `camera_info_topic` wrong (the log says it is guessing the FOV), the depth map has holes where the frame is (`corner depth missing`), or the sample boxes are landing on the wall behind it (`corner depths disagree` / `corners not coplanar`). |
-| `/window_pose` centre wanders as you move the airframe | The estimate is not being placed correctly in NED. Check `cam_roll/cam_pitch/cam_yaw` and the lever arm — they must be measured to the D435i's left imager — and that `/fmu/out/vehicle_attitude` is actually in the PX4 DDS topic list. |
+| `/window_pose` centre wanders as you move the airframe | The estimate is not being placed correctly in NED. Check `cam_roll/cam_pitch/cam_yaw` and the lever arm — they must be measured to the D435i's left imager — and that `/uav_2/fmu/out/vehicle_attitude` is actually in the PX4 DDS topic list. |
 | `Traverse abandoned: could not settle on the approach point` | VO noise is larger than `align_tolerance`, or the estimate is still moving. Loosen `align_tolerance`, or raise `pose_min_samples` / `buffer_seconds` so the target stops shifting under the aircraft. |
 | `window_room_traverse` never leaves `RELOCK`, then lands inside | The window is not in frame from where your moves left the nose. `RELOCK` does not sweep. Stand where the moves end, face where they end, and check `/window_detected` — then fix the last `yaw` in `room_sequence`, not the timeout. |
 | The return approach backs into a wall, or `ALIGN` times out on the way out | The room is shallower than `standoff_distance` (2.0 m, more for a large window) measured from the window wall. That point is *inside* the room. Lower `standoff_distance`, or fly `return_through_window:=false` and land inside. |
@@ -2360,7 +2483,7 @@ that trips it poisons every subsequent run in that power cycle.
   reboot button, or a power cycle). Then confirm before you touch anything:
 
   ```bash
-  ros2 topic echo /fmu/out/estimator_status_flags --once | grep -E "cs_rng_hgt|cs_rng_kin_consistent"
+  ros2 topic echo /uav_2/fmu/out/estimator_status_flags --once | grep -E "cs_rng_hgt|cs_rng_kin_consistent"
   ```
 
   You want `cs_rng_hgt: true` **and** `cs_rng_kin_consistent: true`. If
@@ -2396,7 +2519,7 @@ not in a blind descent — PX4 adds `local_position` to Offboard's requirements.
 You can watch this happen live:
 
 ```bash
-ros2 topic echo /fmu/out/failsafe_flags --once | grep mode_req_local_position
+ros2 topic echo /uav_2/fmu/out/failsafe_flags --once | grep mode_req_local_position
 ```
 
 Bit 14 (value `16384`, `NAVIGATION_STATE_OFFBOARD`) appears in that bitmask
@@ -2408,7 +2531,7 @@ rather than noise alongside `offboard_control_signal_lost`.
 | flag in the new `PX4 failsafe:` log line | meaning | fix |
 |---|---|---|
 | `local_position_invalid` + `local_velocity_invalid`, **flickering on and off every 1–2 s while the vehicle sits still** | EKF2 has no yaw alignment (`cs_yaw_align` false), so the horizontal estimate is never anchored to a heading. Vision position can be fusing happily (`cs_ev_pos` true, `xy_valid` true) and this still bites — but only once **armed**, because the commander only enforces mode requirements then. | See 10.3. |
-| `offboard_control_signal_lost` | No `OffboardControlMode` reached PX4 for `COM_OF_LOSS_T` (default **1.0 s**). Sometimes a stall in the uXRCE-DDS uplink — but it is also set as a *side effect* when PX4 drops Offboard for another reason, so do not stop reading at this flag. | Rule out 10.3 first. Then: run the node with `ros2 run`, not inside a busy launch; cut the number of `/fmu/out` topics being bridged; check the agent with `-v6` for dropped uplink; consider `COM_OF_LOSS_T` 1.5–2.0. |
+| `offboard_control_signal_lost` | No `OffboardControlMode` reached PX4 for `COM_OF_LOSS_T` (default **1.0 s**). Sometimes a stall in the uXRCE-DDS uplink — but it is also set as a *side effect* when PX4 drops Offboard for another reason, so do not stop reading at this flag. | Rule out 10.3 first. Then: run the node with `ros2 run`, not inside a busy launch; cut the number of `/uav_2/fmu/out` topics being bridged; check the agent with `-v6` for dropped uplink; consider `COM_OF_LOSS_T` 1.5–2.0. |
 | `manual_control_signal_lost` | RC link lost while armed. | Keep the TX on. If you deliberately fly without RC, set `COM_RCL_EXCEPT` bit 2 (value `4`) to exempt Offboard. |
 | `gcs_connection_lost` | QGC/datalink dropped, `COM_DL_LOSS_T` expired. | `COM_DLL_EXCEPT`, or keep QGC connected. |
 
@@ -2451,7 +2574,7 @@ and the node reports `ekf_fusing=True`. Nothing complains until you arm.
 **Check it:**
 
 ```bash
-ros2 topic echo /fmu/out/estimator_status_flags --once \
+ros2 topic echo /uav_2/fmu/out/estimator_status_flags --once \
   | grep -E "cs_yaw_align|cs_ev_pos|cs_ev_yaw|cs_mag_hdg|cs_gnss_yaw"
 ```
 
@@ -2469,6 +2592,7 @@ EKF2_MAG_TYPE = 5    # None
 **Half 2 — declare the vision frame as NED**, or half 1 does nothing:
 
 ```bash
+# ZED path only (sequence_vio_test.launch.py, since removed):
 ros2 launch drone_testing sequence_vio_test.launch.py pose_frame:=ned ...
 ```
 
@@ -2510,10 +2634,10 @@ after arming.
 1. Props **off** for the first run of any changed code.
 2. **Reboot the flight controller.** `cs_rng_kin_consistent` is sticky across a
    whole power cycle and is the usual reason the node will not arm (10.1).
-3. `ros2 topic echo /fmu/out/estimator_status_flags --once` → `cs_rng_hgt` and
+3. `ros2 topic echo /uav_2/fmu/out/estimator_status_flags --once` → `cs_rng_hgt` and
    `cs_rng_kin_consistent` both true, `cs_baro_hgt` is *not* carrying the
    height on its own.
-4. `ros2 topic echo /fmu/out/vehicle_local_position --once` → `z_valid` and
+4. `ros2 topic echo /uav_2/fmu/out/vehicle_local_position --once` → `z_valid` and
    `dist_bottom_valid` both true.
 5. RC kill switch tested on the bench, this session.
 6. `takeoff_altitude` set low (0.30 m).

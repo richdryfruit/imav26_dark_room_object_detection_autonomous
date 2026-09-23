@@ -165,7 +165,7 @@ class DollDetect(Node):
                                 # a doll does not move.
 
     # ---- the geotag -------------------------------------------------------
-    MERGE_RADIUS = 0.60         # m. Two detections closer together than this
+    MERGE_RADIUS = 0.20         # m. Two detections closer together than this
                                 # in the room are the same doll. Set it from
                                 # how far apart the dolls actually are: it must
                                 # be comfortably smaller than the smallest gap
@@ -229,6 +229,27 @@ class DollDetect(Node):
         self.target_height = float(self.declare_parameter(
             'target_height', 0.10).value)
 
+        # No calibration file for the camera (the C920 under usb_cam publishes
+        # K = 0): derive a pinhole from its horizontal field of view and the
+        # image size. 0 = require a real CameraInfo.
+        self.hfov_deg = float(self.declare_parameter('hfov_deg', 0.0).value)
+
+        # WHICH FRAME THE DOLLS ARE TAGGED IN.
+        #   ned    PX4's local frame (EKF2). Drifts in the dark room.
+        #   arena  the 2D lidar's wall fix (/lidar/odom_kf, wall_localizer's
+        #          frame: origin at the room's interior SW corner, +X along
+        #          the window wall). Re-derived from the walls every scan, so
+        #          two sightings of one doll land together however far EKF2
+        #          has wandered. EKF2 only bridges the ~0.2 s between scans.
+        self.geotag_frame = str(self.declare_parameter(
+            'geotag_frame', 'ned').value).strip().lower()
+        if self.geotag_frame not in ('ned', 'arena'):
+            raise SystemExit(f"geotag_frame must be ned|arena, got "
+                             f"'{self.geotag_frame}'")
+        self.lidar_fix = None       # (x, y, rot, n0, e0, t): see lidar_callback
+        self.lidar_max_age = float(self.declare_parameter(
+            'lidar_max_age', 1.0).value)
+
         self.publish_image = bool(self.declare_parameter('publish_image', False).value)
         self.require_enable = bool(self.declare_parameter('require_enable', True).value)
 
@@ -269,7 +290,13 @@ class DollDetect(Node):
                 qos_profile=sensor_qos, callback_group=self.sensor_cbg)
             for name in versioned_names('vehicle_local_position')
         ]
-        self.create_subscription(VehicleAttitude, '/fmu/out/vehicle_attitude',
+        if self.geotag_frame == 'arena':
+            from nav_msgs.msg import Odometry
+            self.create_subscription(
+                Odometry, str(self.declare_parameter(
+                    'lidar_odom_topic', '/lidar/odom_kf').value),
+                self.lidar_callback, 10, callback_group=self.sensor_cbg)
+        self.create_subscription(VehicleAttitude, '/uav_2/fmu/out/vehicle_attitude',
                                  self.attitude_callback, qos_profile=sensor_qos,
                                  callback_group=self.sensor_cbg)
         self.create_subscription(Bool, 'doll_detect_enable',
@@ -320,7 +347,7 @@ class DollDetect(Node):
             f"doll_detect: {self.image_topic} + {self.depth_topic}, model "
             f"{self.model_path}, confirming at {self.min_frames} frames, "
             f"merging detections within {self.merge_radius:.2f} m of each "
-            f"other in NED. "
+            f"other in {self.geotag_frame.upper()}. "
             + ("Waiting for doll_detect_enable." if self.require_enable
                else "Running free (require_enable:=false)."))
 
@@ -358,6 +385,37 @@ class DollDetect(Node):
             self.depth_image = depth
             self.depth_time = time.monotonic()
 
+    def lidar_callback(self, msg):
+        """Newest arena fix, with the EKF2 pose at the moment it arrived.
+
+        A degenerate fix (wall_localizer publishes those at variance 100) is
+        dropped, exactly as the flight node drops it.
+        """
+        cov = msg.pose.covariance
+        if max(float(cov[0]), float(cov[7])) > 0.25:
+            return
+        lp = self.local_position
+        if lp is None or not lp.xy_valid:
+            return
+        q = msg.pose.pose.orientation
+        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        # Rotation from EKF2's ENU to the arena: arena yaw - ENU yaw.
+        rot = yaw - (math.pi / 2.0 - float(lp.heading))
+        p = msg.pose.pose.position
+        self.lidar_fix = (float(p.x), float(p.y), rot, float(lp.x), float(lp.y),
+                          time.monotonic())
+
+    def _to_arena(self, p_ned):
+        """An NED point -> arena (x, y, NED z), through the newest fix."""
+        fix = self.lidar_fix
+        if fix is None or time.monotonic() - fix[5] > self.lidar_max_age:
+            return None
+        ax, ay, rot, n0, e0, _ = fix
+        de, dn = p_ned[1] - e0, p_ned[0] - n0          # ENU offset from the fix
+        c, s = math.cos(rot), math.sin(rot)
+        return np.array([ax + c * de - s * dn, ay + s * de + c * dn, p_ned[2]])
+
     def camera_info_callback(self, msg):
         fx, fy, cx, cy = float(msg.k[0]), float(msg.k[4]), float(msg.k[2]), float(msg.k[5])
         if fx <= 1.0 or fy <= 1.0:
@@ -390,6 +448,12 @@ class DollDetect(Node):
     # ------------------------------------------------------------ the frame
 
     def image_callback(self, msg):
+        if self.intrinsics is None and self.hfov_deg > 0.0 and msg.width > 0:
+            f = 0.5 * msg.width / math.tan(math.radians(self.hfov_deg) / 2.0)
+            self.intrinsics = (f, f, 0.5 * msg.width, 0.5 * msg.height)
+            self.get_logger().warning(
+                f"No calibrated CameraInfo: pinhole from hfov_deg "
+                f"{self.hfov_deg:.1f} at {msg.width}x{msg.height} (f={f:.0f} px).")
         if not self.enabled:
             return
 
@@ -526,8 +590,12 @@ class DollDetect(Node):
             return None
 
         if self.depth_source == 'rangefinder':
-            # Flat floor under a level, downward camera: z-depth = HAGL.
-            distance = float(lp.dist_bottom) - self.target_height
+            # Flat floor under a downward camera: z-depth = the CAMERA's height
+            # above the floor minus the doll's. dist_bottom is the body's
+            # height (PX4 moves the range to the IMU), so take off how far the
+            # lens sits below it (t_cam, rotated by the attitude: +down).
+            below = float(quat_rotate(np.asarray(att.q, dtype=float), self.t_cam)[2])
+            distance = float(lp.dist_bottom) - below - self.target_height
             if not (self.depth_min <= distance <= self.depth_max):
                 return None
         else:
@@ -553,6 +621,8 @@ class DollDetect(Node):
         p_body = self.r_cam @ p_cam + self.t_cam
         p_ned = np.array([lp.x, lp.y, lp.z]) + quat_rotate(
             np.asarray(att.q, dtype=float), p_body)
+        if self.geotag_frame == 'arena':
+            return self._to_arena(p_ned)
         return p_ned
 
     def _box_depth(self, box, depth):
@@ -646,7 +716,7 @@ class DollDetect(Node):
 
     def destroy_node(self):
         self.get_logger().warning(
-            f"FINAL DOLL COUNT: {self.dolls.total}. Positions (NED, m): "
+            f"FINAL DOLL COUNT: {self.dolls.total}. Positions ({self.geotag_frame.upper()}, m): "
             f"{self.dolls.report() or 'none'}.")
         super().destroy_node()
 

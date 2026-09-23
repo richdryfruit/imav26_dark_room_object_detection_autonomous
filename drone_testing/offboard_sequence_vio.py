@@ -55,7 +55,7 @@ a height estimate that dies is a lost aircraft.
 
 PX4 SIDE
 --------
-This node assumes the parameters listed in launch/sequence_vio_test.launch.py
+This node assumes the parameters listed in launch/sequence_vio_realsense.launch.py
 are already set on the flight controller, and it will not arm if EKF2 is not
 actually fusing what it thinks it is. Read that file before the first flight.
 

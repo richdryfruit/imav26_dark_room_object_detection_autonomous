@@ -1,0 +1,19 @@
+# MISSION PART 1 on the real aircraft. Loaded by the flight node:
+#   ros2 run drone_testing mission_fsm_part1 --ros-args --params-file \
+#     $(ros2 pkg prefix drone_testing)/share/drone_testing/config/hw_part1.yaml
+# (mission_fsm_part1.launch.py agent_only:=false loads it too, via hw_params.)
+/**:
+  ros__parameters:
+    # THE PILOT OWNS MODE AND ARMING: both come from the transmitter (or
+    # the imav_bringup dashboard). The node streams setpoints and waits.
+    request_offboard_from_ros: false
+    arm_from_ros: false
+
+    lateral_source: flow          # PMW3901 optical flow (x/y) + TFmini (z)
+    window_marker_id: 0           # the 80 x 80 cm ArUco by the window
+    cruise_altitude: 2.10
+    outbound_distance: 9.3        # land here if the marker is never seen
+    slow_land_speed: 0.10         # set MPC_LAND_SPEED 0.1 on the FC to match
+    flight_seconds: 240.0
+    max_altitude: 3.0
+    rangefinder_checks: true

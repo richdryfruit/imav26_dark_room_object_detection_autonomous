@@ -441,14 +441,18 @@ class ArucoPose(Node):
                 self._frame_seq += 1
 
     def _image_callback(self, msg):
-        """SITL frames: sensor_msgs/Image -> BGR, stored like _grab_loop does."""
-        ch = 1 if msg.encoding in ('mono8', '8UC1') else 3
-        frame = np.frombuffer(msg.data, dtype=np.uint8).reshape(
-            msg.height, msg.step // ch, ch)[:, :msg.width]
-        if ch == 1:
-            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-        elif msg.encoding == 'rgb8':
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        """sensor_msgs/Image -> BGR, stored like _grab_loop does.
+
+        SITL's camera, or on the aircraft imav_bringup's usb_cam on the C920
+        (which owns the device, so this node must not open it too).
+        """
+        from drone_testing.window_detect import imgmsg_to_bgr
+        try:
+            frame = imgmsg_to_bgr(msg)
+        except ValueError as exc:
+            self.get_logger().error(f"Down camera frame: {exc}",
+                                    throttle_duration_sec=5.0)
+            return
         with self._frame_lock:
             self._frame = np.ascontiguousarray(frame)
             self._frame_seq += 1

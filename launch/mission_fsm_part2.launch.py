@@ -28,6 +28,8 @@ from launch_ros.substitutions import FindPackageShare
 # still lose to anything given on the command line.
 PART2_DEFAULTS = {
     'fsm_executable': 'mission_fsm_part2',
+    'pad_marker_id': '0',
+    'stream_port': '8081',    # window_detect's browser stream; aruco has 8080
     'window_marker_id': '0',
     'cruise_altitude': '1.75',
     'window_altitude_m': '1.75',
@@ -48,6 +50,8 @@ def generate_launch_description():
     return LaunchDescription(
         [DeclareLaunchArgument(k, default_value=v)
          for k, v in PART2_DEFAULTS.items()]
+        + [DeclareLaunchArgument('hw_params', default_value=PathJoinSubstitution([
+            FindPackageShare('drone_testing'), 'config', 'hw_part2.yaml']))]
         + [IncludeLaunchDescription(
             PythonLaunchDescriptionSource(PathJoinSubstitution([
                 FindPackageShare('drone_testing'),

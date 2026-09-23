@@ -1,26 +1,31 @@
 """
 Sequence test flown on RealSense D435i + RTAB-Map visual-inertial odometry.
 
-    uXRCE-DDS agent + rtabmap_realsense_vio stack + offboard_sequence_vio
+    offboard_sequence_vio, flown on the rtabmap_realsense_vio stack.
+
+The uXRCE-DDS agent and the VIO stack (RealSense + Madgwick + rgbd_odometry +
+PX4 bridge) are NOT started here: imav_bringup (bringup.launch.py) owns both.
+The camera mounting (cam_x ... cam_yaw) and the emitter are set there, in
+imav_bringup's config/params.yaml under vio.extra_args.
 
 Same mission and the same arguments as sequence_test.launch.py -- read that
 file for what the `sequence` string means and for the flight parameters. The
 only difference here is where x and y come from.
 
-    ros2 launch drone_testing sequence_vio_realsense.launch.py cam_x:=0.215
+    ros2 launch drone_testing sequence_vio_realsense.launch.py
     ros2 run drone_testing offboard_sequence_vio --ros-args \
         -p takeoff_altitude:=1.0 \
         -p sequence:="forward 1.0, yaw 30, up 0.5, right 1.0"
 
-As with the ZED and flow versions, `agent_only` defaults to true: launch the
-support stack here and run the flight node by hand in a second pane so stdin
+As with the flow version, `agent_only` defaults to true: nothing is started
+here and you run the flight node by hand in a second pane so stdin
 stays a tty and the q/k aborts keep working. Your RC kill switch is the real
 safety net either way.
 
 
-HOW THIS DIFFERS FROM sequence_vio_test.launch.py (the ZED version)
-===================================================================
-That file flies a gen-1 ZED, which has no IMU: the wrapper hard-disables its
+HOW THIS DIFFERS FROM THE OLD ZED VERSION
+=========================================
+That flew a gen-1 ZED, which has no IMU: the wrapper hard-disables its
 sensor stack, so what EKF2 receives is pure stereo VISUAL odometry and the
 inertial half of "VIO" happens inside EKF2 on the Pixhawk's own IMU.
 
@@ -65,9 +70,7 @@ Three consequences worth knowing before you fly it:
 PX4 PARAMETERS -- set these in QGC BEFORE the first flight
 ================================================================
 
-Read this whole block. The reasoning is identical to the ZED version
-(sequence_vio_test.launch.py) and is not repeated in full; what follows is
-what is DIFFERENT for this camera, plus the numbers you actually type.
+Read this whole block: the numbers you actually type, and why.
 
 --- 1. Height stays on the lidar -------------------------------------------
     EKF2_HGT_REF     = 2   (Range)
@@ -146,7 +149,8 @@ slot in EKF2's buffer and no amount of delay tuning will save it.
     EKF2_EV_POS_X / _Y / _Z  = 0    leave these at zero
 
 Set the geometry with the cam_x / cam_y / cam_z / cam_roll / cam_pitch /
-cam_yaw arguments of THIS launch file instead. They become a static
+cam_yaw arguments of the VIO stack instead (vio.extra_args in imav_bringup's
+config/params.yaml). They become a static
 base_link -> camera_link TF, and because rgbd_odometry runs with
 frame_id:=base_link, RTAB-Map applies the extrinsic itself and publishes the
 pose of the VEHICLE. Setting it in both places double-counts it.
@@ -182,78 +186,19 @@ flow, not the lidar.
 
 The D435i has one advantage over the ZED here that is worth knowing: its IR
 projector puts texture into scenes that have none, so the "bare white arena
-wall" case that argued for keeping flow is weaker than it was. See the
-`emitter` argument below.
+wall" case that argued for keeping flow is weaker than it was. It is kept
+OFF for VIO, though (the VIO stack's `emitter` argument, default 0).
 """
 
-import os
-
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, GroupAction,
-                            IncludeLaunchDescription, TimerAction)
+from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.conditions import IfCondition, UnlessCondition
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     agent_only = LaunchConfiguration('agent_only')
-
-    microxrce_node = Node(
-        package='micro_ros_agent',
-        executable='micro_ros_agent',
-        name='micro_xrce_dds_agent',
-        output='screen',
-        arguments=['serial', '--dev', '/dev/ttyTHS1', '-b', '921600'],
-    )
-
-    # The whole RealSense -> Madgwick -> rgbd_odometry -> PX4 chain lives in
-    # rtabmap_realsense_vio. Included rather than reproduced: the emitter
-    # workaround, the exact-sync topic set and the OdomF2M/MaxSize string-type
-    # dance are all non-obvious and there is no reason to have two copies.
-    #
-    # px4_bridge:=true is the point of this file -- the stack's own default is
-    # false, because on the bench you want the odometry without anything
-    # reaching the flight controller.
-    # Scoped. IncludeLaunchDescription does NOT push a scope in Jazzy: its
-    # launch_arguments land in the SHARED context, and every parent argument
-    # forwards down into rs_launch.py, which warns about each one it does not
-    # recognise ("Parameter 'sequence' is not supported" x20). The noise buries
-    # real errors, and the leak in the other direction is how a node gated on
-    # an argument the include also sets gets silently skipped.
-    vio_stack = GroupAction([IncludeLaunchDescription(
-        PythonLaunchDescriptionSource([os.path.join(
-            get_package_share_directory('rtabmap_realsense_vio'),
-            'launch', 'realsense_stereo_imu_rtabmap.launch.py')]),
-        launch_arguments={
-            'px4_bridge': 'true',
-            # This file runs its own agent (microxrce_node). Without this the
-            # included stack starts a second one on the same serial port and
-            # the loser dies -- see rtabmap_realsense_vio README.
-            'agent': 'false',
-            'cam_x': LaunchConfiguration('cam_x'),
-            'cam_y': LaunchConfiguration('cam_y'),
-            'cam_z': LaunchConfiguration('cam_z'),
-            'cam_roll': LaunchConfiguration('cam_roll'),
-            'cam_pitch': LaunchConfiguration('cam_pitch'),
-            'cam_yaw': LaunchConfiguration('cam_yaw'),
-            'emitter': LaunchConfiguration('emitter'),
-            'f2m_max_size': LaunchConfiguration('f2m_max_size'),
-        }.items(),
-    )], scoped=True, forwarding=True,
-        # forwarding MUST stay True: the launch_arguments values above are
-        # themselves LaunchConfiguration('cam_x') and friends, which resolve in
-        # this group's scope. forwarding=False makes the include fail with
-        # "launch configuration 'cam_x' does not exist".
-        #
-        # The cost of that is noise: rs_launch.py sees every parent argument and
-        # warns "Parameter 'sequence' is not supported" for each one. ~37 yellow
-        # lines at startup, all harmless -- the stack still comes up correctly.
-        # scoped=True is what matters here, keeping this include's own sets
-        # (px4_bridge, agent) from leaking back out into the parent context.
-        condition=IfCondition(LaunchConfiguration('vio')))
 
     # 30 s, not the ZED file's 10 s. Two things have to finish first: the
     # uXRCE-DDS session (PX4 creates its /fmu/out writers LAST, ~7 s after the
@@ -309,7 +254,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'agent_only', default_value='true',
-            description='Start only the support stack (agent, VIO, LCD); run the '
+            description='Start only the support stack (LCD); run the '
                         'flight node manually so q/k stay available.'),
 
         # ---- the mission, identical to sequence_test.launch.py ----
@@ -363,30 +308,10 @@ def generate_launch_description():
             'max_altitude', default_value='3.0',
             description='m above the arming point that an up step may not exceed.'),
         DeclareLaunchArgument(
-            'request_offboard_from_ros', default_value='true',
+            'request_offboard_from_ros', default_value='false',
             description='false = you flip the Offboard switch on the TX yourself.'),
 
         # ---- vision ----
-        DeclareLaunchArgument(
-            'vio', default_value='true',
-            description='Start the RealSense + RTAB-Map + PX4 bridge stack here. '
-                        'false if you already run it from another terminal.'),
-        DeclareLaunchArgument(
-            'emitter', default_value='0',
-            description='IR projector. 0 = OFF and that is the only setting flown '
-                        'on this airframe: the projected dots are fixed to the '
-                        'camera and slide across the scene as it moves, which '
-                        'corrupts the feature tracking rgbd_odometry does on '
-                        'infra1. The passive-stereo depth penalty is accepted. '
-                        'Note the projector is still on for the first ~15 s of '
-                        'every run -- rs_launch.py drops emitter_enabled as a '
-                        'launch argument, so it is applied by a param set after '
-                        'startup.'),
-        DeclareLaunchArgument(
-            'f2m_max_size', default_value='500',
-            description='OdomF2M/MaxSize. Bounds the local map so the odometry rate '
-                        'stays flat instead of decaying as the map fills. Lower it to '
-                        '300 if the rate still sags over a long flight.'),
         DeclareLaunchArgument(
             'hold_xy_from_ground', default_value='true',
             description='Latch x/y position hold before the climb instead of after. '
@@ -403,32 +328,6 @@ def generate_launch_description():
                         'it. Setting false makes the topic mandatory and WILL refuse '
                         'to arm on this stack.'),
 
-        # ---- camera mounting: pose of the camera IN THE BODY FRAME, ROS
-        # convention (x fwd, y LEFT, z UP), metres and radians. Measured from
-        # the PIXHAWK, not the CG -- see item 4 in the header. On this airframe
-        # the camera is ~21.5 cm from the flight controller, so cam_x:=0.215
-        # unless that distance has a y or z component you need to split out.
-        DeclareLaunchArgument(
-            'cam_x', default_value='0.215',
-            description='Metres the camera sits FORWARD of the Pixhawk.'),
-        DeclareLaunchArgument(
-            'cam_y', default_value='0.0',
-            description='Metres the camera sits to the LEFT of the Pixhawk (ROS sign).'),
-        DeclareLaunchArgument(
-            'cam_z', default_value='0.0',
-            description='Metres the camera sits ABOVE the Pixhawk.'),
-        DeclareLaunchArgument(
-            'cam_roll', default_value='0.0',
-            description='Radians, positive = right side down.'),
-        DeclareLaunchArgument(
-            'cam_pitch', default_value='0.0',
-            description='Radians, POSITIVE = nose down. A camera angled down '
-                        '20 deg for window detection is cam_pitch:=0.35.'),
-        DeclareLaunchArgument(
-            'cam_yaw', default_value='0.0',
-            description='Radians, positive = camera pointed to the LEFT of straight '
-                        'ahead. A sideways-mounted camera MUST have this set.'),
-
         # ---- LCD ----
         DeclareLaunchArgument(
             'lcd', default_value='true',
@@ -437,8 +336,6 @@ def generate_launch_description():
             'lcd_port', default_value='',
             description='Arduino serial port; empty = auto-detect ttyACM*/ttyUSB*.'),
 
-        microxrce_node,
-        vio_stack,
         lcd_node,
         sequence_node,
     ])

@@ -62,7 +62,7 @@ class ArmDisarmTest(Node):
     DISARM_TIMEOUT = 5.0
     # If you switch to Offboard from your RC transmitter instead of from
     # this node, set this to False.
-    REQUEST_OFFBOARD_FROM_ROS = True
+    REQUEST_OFFBOARD_FROM_ROS = False  # the TX (or the dashboard) switches Offboard
     # ----------------------------------------------------------------------
 
     def __init__(self):
@@ -76,11 +76,11 @@ class ArmDisarmTest(Node):
         )
 
         self.offboard_control_mode_pub = self.create_publisher(
-            OffboardControlMode, '/fmu/in/offboard_control_mode', 10)
+            OffboardControlMode, '/uav_2/fmu/in/offboard_control_mode', 10)
         self.vehicle_command_pub = self.create_publisher(
-            VehicleCommand, '/fmu/in/vehicle_command', 10)
+            VehicleCommand, '/uav_2/fmu/in/vehicle_command', 10)
         self.rates_setpoint_pub = self.create_publisher(
-            VehicleRatesSetpoint, '/fmu/in/vehicle_rates_setpoint', 10)
+            VehicleRatesSetpoint, '/uav_2/fmu/in/vehicle_rates_setpoint', 10)
 
         self.vehicle_status_subs = subscribe_versioned(
             self, VehicleStatus, 'vehicle_status',
@@ -97,7 +97,7 @@ class ArmDisarmTest(Node):
         # PX4 refused. The ack carries the MAV_RESULT for every command we send.
         self._acked = set()
         self.command_ack_sub = self.create_subscription(
-            VehicleCommandAck, '/fmu/out/vehicle_command_ack',
+            VehicleCommandAck, '/uav_2/fmu/out/vehicle_command_ack',
             self.command_ack_callback, qos_profile=sensor_qos)
 
         self.nav_state = VehicleStatus.NAVIGATION_STATE_MANUAL

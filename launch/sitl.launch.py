@@ -275,12 +275,19 @@ def _real_course(sdf, models_dir, out_dir, scale=1.0):
     return sdf.replace('</world>', '\n'.join(extra) + '\n</world>')
 
 
-def _speckle_png(path, width=1024, height=1024, seed=7, per_mpx=6700):
-    """A grey floor with random dark/light speckles, as a PNG (no deps).
+def _speckle_png(path, width=1024, height=1024, seed=7, per_mpx=90000):
+    """A DARK floor with fine, dense speckle, as a PNG (no deps).
 
-    The real dark-room floor is speckled, which is what lets the PMW3901 see
-    motion; the sim floor was one flat colour and the flow camera saw nothing
-    inside the room.
+    Matched to the real cage floor (launch/floor.jpg): near-black terrazzo
+    with small, densely packed light flecks -- NOT the pale floor with big
+    blobs this used to draw. Two reasons it matters:
+
+      * the PMW3901 needs texture to see motion at all, and fine dense
+        speckle gives it far more gradient per frame than a few big blobs;
+      * floor_line separates the white carpet strip from the floor by
+        BRIGHTNESS, and pale blobs the size of a leaf defeat that -- in the
+        scaled world 83% of the down-camera frame passed the threshold, so
+        the strip could not be found. Dark floor, bright carpet, as in life.
     """
     import random
     import struct
@@ -288,12 +295,12 @@ def _speckle_png(path, width=1024, height=1024, seed=7, per_mpx=6700):
     if os.path.exists(path):
         return path
     rnd = random.Random(seed)
-    img = bytearray([150]) * (width * height)
-    # per_mpx speckles per 1024x1024 of texture (was 9000: a little lighter).
+    img = bytearray([45]) * (width * height)        # near-black base
+    # Dense and small: ~90k flecks per 1024x1024, radius 0-1 px.
     for _ in range(int(per_mpx * width * height / (1024 * 1024))):
         cx, cy = rnd.randrange(width), rnd.randrange(height)
-        r = rnd.randint(2, 7)
-        v = rnd.choice((30, 60, 90, 200, 235))
+        r = rnd.randint(0, 1)
+        v = rnd.choice((25, 70, 110, 150, 190))
         for y in range(max(0, cy - r), min(height, cy + r + 1)):
             for x in range(max(0, cx - r), min(width, cx + r + 1)):
                 if (x - cx) ** 2 + (y - cy) ** 2 <= r * r:
@@ -316,9 +323,9 @@ def _speckle_png(path, width=1024, height=1024, seed=7, per_mpx=6700):
 def _speckle_floors(sdf):
     """Speckle the dark room floor and the arena floor outside it."""
     import re
-    room = _speckle_png(os.path.join(_SIM_MODELS, 'speckle_room_v2.png'))
+    room = _speckle_png(os.path.join(_SIM_MODELS, 'speckle_room_v3.png'))
     # The arena is 15.4 x 30.8 m: a 1:2 texture keeps the speckles round.
-    arena = _speckle_png(os.path.join(_SIM_MODELS, 'speckle_arena_v2.png'),
+    arena = _speckle_png(os.path.join(_SIM_MODELS, 'speckle_arena_v3.png'),
                          1024, 2048, seed=11)
     for name, tex in (('room_floor', room), ('arena_floor', arena)):
         mat = ('<material><ambient>1 1 1 1</ambient><diffuse>1 1 1 1</diffuse>'
@@ -388,19 +395,14 @@ def _setup(context):
     share = get_package_share_directory('drone_testing')
     urdf = xacro.process_file(
         os.path.join(share, 'sim', 'sim_drone.urdf.xacro')).toxml()
-    # COLLISION FOOTPRINT OF THE REAL AIRFRAME (0.26 m), NOT THE x500's. The
-    # sim flies PX4's x500 (its dynamics and control allocation), but its
-    # rotors sit at +/-0.174 m with 0.14 m props: 0.63 m across, wider than
-    # the 0.60 m window, so the props struck the frame mid-traverse. Props no
-    # longer collide and the body plate is cut to 0.24 m; the landing gear
-    # (0.28 m, 0.227 m below the body) is untouched so it still stands. Pass
-    # the node the matching size: gear_below_camera 0.19, drone_height 0.29,
-    # drone_width 0.28.
-    import re as _re
-    urdf = _re.sub(r'<collision[^>]*>(?:(?!</collision>).)*?<box size="0\.2792307692[^"]*"/>'
-                   r'.*?</collision>', '', urdf, flags=_re.S)
-    urdf = urdf.replace('0.35355339059327373 0.35355339059327373 0.05',
-                        '0.24 0.24 0.05')
+    # LDS-01 range, 3.5 m. lidar_range:=7.7 in the 2.2x-scaled world keeps the
+    # range-to-room ratio of the real 2.5 m room (else far walls drop out).
+    urdf = urdf.replace('<max>3.5</max>', f"<max>{float(arg('lidar_range'))}</max>")
+    # Full x500 collision geometry, props included: nothing passes through a
+    # wall. Its rotors sit at +/-0.174 m with 0.14 m props, 0.63 m across --
+    # this is what the flight node must be told (drone_width 0.63,
+    # drone_height 0.29, gear_below_camera 0.19). It fits the 2.2x-scaled
+    # world's 1.32 m window; it does NOT fit the unscaled 0.60 m one.
 
     # TFmini Plus: 0.1-12 m, ~2 cm noise. The only <max>100.0</max> in the
     # model is the downward lidar's range; the noise goes right after it.
@@ -508,7 +510,40 @@ def _setup(context):
         # (slow_land_speed), so at the 0.7 default PX4 never agrees it has
         # landed and refuses the disarm. SET THE SAME ON THE AIRCRAFT.
         'MPC_LAND_SPEED': 0.1,
+        # The TFmini crossing a window SILL reads a ~1.5-3 m step down and
+        # back. At the default gate (1.0) EKF2's kinematic consistency check
+        # rejects the rangefinder for it and only re-accepts it while
+        # |vz| > 0.5 m/s -- so a hover never gets height back (SITL: landed in
+        # the dark room). One sill step at 20-100 Hz peaks the check's filtered
+        # ratio at ~10/gate^2 -> 5.0 rides through it (0.4 < 1); a stuck or
+        # faulty sensor is still caught by the innovation gate (EKF2_RNG_GATE).
+        # SAME VALUE ON THE REAL FC.
+        'EKF2_RNG_K_GATE': 5.0,
+        # SIMULATOR ONLY. The nodes stream setpoints at 20 Hz of WALL time;
+        # PX4 measures the Offboard timeout in SIM time, and this laptop runs
+        # the scaled world at 0.2-0.7x real time (gz_lidar_node reporting
+        # 1.2 Hz instead of 5.5 is that). At 0.2x, 20 Hz wall is 4 Hz sim and
+        # a dip takes it under the 2 Hz PX4 needs -> offboard_control_signal_
+        # lost mid-climb. 3 s of grace covers the dips. LEAVE THE FC AT 0.5.
+        'COM_OF_LOSS_T': 3.0,
+        # SIMULATOR ONLY, and only because the world is 2.2x scale: EKF2
+        # stops using the rangefinder for height above EKF2_RNG_A_HMAX (5 m
+        # by default) and, with no baro, the height estimate then goes
+        # invalid -- which is what landed the 5.5 m scaled leg. The REAL
+        # flight is at 2.5 m and never reaches the default ceiling.
+        'EKF2_RNG_A_HMAX': 8.0,
+        # A gentler thrust ramp off the ground: less of a lurch to correct
+        # in the first metre, where ground effect is strongest and the flow
+        # is least useful. SET THE SAME ON THE REAL FC (default is 3.0).
+        'MPC_TKO_RAMP_T': 4.0,
     }
+    if arg('rc') == 'tx':
+        # A transmitter, as on the aircraft: sim/sim_tx.py sends RC channels
+        # (RC_CHANNELS_OVERRIDE -> PX4's RC input). Sticks on 1-4, the ARM
+        # switch on 5, the OFFBOARD switch on 6. The pilot flips them.
+        params.update({'COM_RC_IN_MODE': 0, 'RC_MAP_ROLL': 1, 'RC_MAP_PITCH': 2,
+                       'RC_MAP_THROTTLE': 3, 'RC_MAP_YAW': 4,
+                       'RC_MAP_ARM_SW': 5, 'RC_MAP_OFFB_SW': 6})
     env_params = ' '.join(f'PX4_PARAM_{k}={v}' for k, v in params.items())
     set_params = '; '.join(f'bin/px4-param set {k} {v}' for k, v in params.items())
     px4 = ExecuteProcess(
@@ -519,7 +554,9 @@ def _setup(context):
              # exec, so Ctrl-C on the launch reaches PX4 itself.
              f'pkill -x px4; sleep 1; '
              f'cd {px4_dir} && rm -f build/px4_sitl_default/rootfs/*.bson && '
-             f'{env_params} PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 '
+             # Same topic prefix as the aircraft (UXRCE_DDS_NS=uav_2): the
+             # nodes subscribe to /uav_2/fmu/... only.
+             f'{env_params} PX4_UXRCE_DDS_NS=uav_2 PX4_GZ_STANDALONE=1 PX4_SYS_AUTOSTART=4001 '
              f'PX4_GZ_MODEL_NAME=x500_drone PX4_GZ_WORLD={world_name} '
              'exec build/px4_sitl_default/bin/px4 -d'],
         output='screen', sigterm_timeout='5', sigkill_timeout='5')
@@ -557,6 +594,17 @@ def _setup(context):
                               'marker_size': float(arg('marker_size')),
                               'aruco_dict': arg('aruco_dict'),
                               'stream_port': 8080}])
+    # The floral carpet strip under the straight leg (strip_L/C/R in the
+    # world, flower_wallpaper.jpg), which mission_fsm_full flies along.
+    line = Node(package='drone_testing', executable='floor_line',
+                name='floor_line', output='screen',
+                parameters=[{'image_topic': '/down_cam/image',
+                             'hfov_deg': 78.0,
+                             'stream_port': 8082,
+                             'require_enable': False,
+                             'min_width': float(arg('line_min_width')),
+                             'max_width': float(arg('line_max_width'))}],
+                condition=IfCondition(arg('line')))
     window = Node(package='drone_testing', executable='window_detect',
                   name='window_detect', output='screen',
                   parameters=[{
@@ -580,6 +628,14 @@ def _setup(context):
                          'lidar_rplidar.yaml' if arg('lidar_config') == 'sim'
                          else 'lidar_arena.yaml')
     lidar_on = IfCondition(arg('lidar'))
+    # lidar_loc subscribes /fmu/out/... ; PX4 publishes under UXRCE_DDS_NS
+    # (uav_2), so without these the leveler drops every scan for missing
+    # attitude. Same remaps as launch/lidar_real.launch.py on the aircraft.
+    from drone_testing.px4_topics import versioned_names
+    _pfx = versioned_names('x')[0][:-1]
+    px4_remaps = [(f'/fmu/out/{t}', f'{_pfx}{t}')
+                  for t in ('vehicle_attitude', 'vehicle_odometry',
+                            'vehicle_local_position_v1', 'timesync_status')]
     lidar = [
         Node(package='lidar_loc', executable='gz_lidar_node', name='gz_lidar_node',
              output='screen', condition=lidar_on,
@@ -592,7 +648,8 @@ def _setup(context):
         Node(package='lidar_loc', executable='scan_leveler', name='scan_leveler',
              output='screen', condition=lidar_on,
              parameters=[arena, {'use_sim_time': True,
-                                 'mount_xyz': [0.0, 0.0, 0.135]}]),
+                                 'mount_xyz': [0.0, 0.0, 0.135]}],
+             remappings=px4_remaps),
         # Heading from the compass, not the window-gap signature: the gap
         # test picked the wrong wall family here (fix 0.8 m out, frame
         # flipping). seed_yaw_offset is 0 in SITL (arena axes = Gazebo ENU).
@@ -600,12 +657,20 @@ def _setup(context):
              output='screen', condition=lidar_on,
              parameters=[arena, {'use_sim_time': True,
                                  'yaw_source': arg('lidar_yaw_source'),
-                                 'seed_yaw_offset': float(arg('lidar_seed_yaw'))}]),
+                                 'seed_yaw_offset': float(arg('lidar_seed_yaw'))}],
+             remappings=px4_remaps),
         Node(package='lidar_loc', executable='pose_kf.py', name='pose_kf',
              output='screen', condition=lidar_on,
              parameters=[{'use_sim_time': True}]),
     ]
-    return env + lidar + [gazebo, rsp, spawn, bridge, TimerAction(period=6.0, actions=[window]),
+    # The dashboard operator's part (heartbeat, Offboard, arm). SITL only;
+    # it refuses to run on domain 0. operator:=false to click the real
+    # px4_telemetry_dashboard instead.
+    operator = Node(package='drone_testing', executable='sim_operator',
+                    name='sim_operator', output='screen',
+                    condition=IfCondition(arg('operator')))
+    return env + lidar + [operator, gazebo, rsp, spawn, bridge,
+                  TimerAction(period=6.0, actions=[window]), line,
                   TimerAction(period=8.0, actions=[px4]),
                   TimerAction(period=20.0, actions=[px4_params]),
                   agent, TimerAction(period=5.0, actions=[aruco])]
@@ -646,6 +711,22 @@ def generate_launch_description():
         DeclareLaunchArgument('light_scale', default_value='0.5',
                               description='Multiplier on every light in the world '
                                           '(1 = as authored). The dark room is dim.'),
+        DeclareLaunchArgument('rc', default_value='none',
+                              description='none = no RC (COM_RC_IN_MODE 4); '
+                              'tx = RC input from sim/sim_tx.py, arm ch5, '
+                              'offboard ch6, like the aircraft'),
+        DeclareLaunchArgument('line', default_value='true',
+                              description='floor_line on the down camera: the '
+                              'carpet strip the straight leg follows'),
+        DeclareLaunchArgument('line_min_width', default_value='0.35'),
+        DeclareLaunchArgument('line_max_width', default_value='2.20',
+                              description='scaled world: the strip is 1.32 m'),
+        DeclareLaunchArgument('lidar_range', default_value='3.5',
+                              description='sim 2D lidar max range (m); 7.7 = '
+                              '3.5 x 2.2 for the scaled world'),
+        DeclareLaunchArgument('operator', default_value='true',
+                              description='sim_operator: heartbeat + Offboard + '
+                              'arm, as the dashboard operator does on the aircraft'),
         DeclareLaunchArgument('window_detect', default_value='true',
                               description='Start window_detect on the sim front camera '
                                           '(part 2). Browser view on :8081.'),

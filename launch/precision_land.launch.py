@@ -84,14 +84,6 @@ def generate_launch_description():
     agent_only = LaunchConfiguration('agent_only')
     flight = LaunchConfiguration('flight')
 
-    microxrce_node = Node(
-        package='micro_ros_agent',
-        executable='micro_ros_agent',
-        name='micro_xrce_dds_agent',
-        output='screen',
-        arguments=['serial', '--dev', '/dev/ttyTHS1', '-b', '921600'],
-    )
-
     # The detector. Started a little ahead of the flight node so the camera
     # has opened and /aruco/detected is already being published by the time
     # anything asks it a question.
@@ -181,12 +173,12 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'agent_only', default_value='true',
-            description='Start the agent and the detector but not the flight '
+            description='Start the detector but not the flight '
                         'node, so you can run that by hand and keep the q/k '
                         'keyboard aborts. false = fly the whole thing.'),
         DeclareLaunchArgument(
             'flight', default_value='true',
-            description='false = camera and detection only: no DDS agent, no '
+            description='false = detection only: no '
                         'flight node. Use this for the bench sign check.'),
         DeclareLaunchArgument(
             'detect', default_value='true',
@@ -231,7 +223,7 @@ def generate_launch_description():
             'max_altitude', default_value='3.00',
             description='m above the arming point the flight may not exceed.'),
         DeclareLaunchArgument(
-            'request_offboard_from_ros', default_value='true',
+            'request_offboard_from_ros', default_value='false',
             description='false = you flip the Offboard switch on the TX.'),
 
         # ---- alignment ----
@@ -347,7 +339,7 @@ def generate_launch_description():
         # flight:=false leaves just the camera side running, which is the bench
         # sign check. Grouped rather than given a condition directly, because
         # two of these already carry one of their own.
-        GroupAction([microxrce_node, lcd_node, land_node],
+        GroupAction([lcd_node, land_node],
                     condition=IfCondition(flight)),
         aruco_node,
     ])

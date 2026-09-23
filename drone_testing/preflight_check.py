@@ -143,7 +143,7 @@ class PreflightCheck(Node):
         while time.monotonic() < deadline:
             rclpy.spin_once(self, timeout_sec=0.2)
             available = {name: types for name, types in self.get_topic_names_and_types()
-                         if name.startswith('/fmu/out/')}
+                         if name.startswith('/uav_2/fmu/out/')}
             if available:
                 break
 
@@ -155,9 +155,9 @@ class PreflightCheck(Node):
         self.rates_pub = None
         if stream:
             self.ocm_pub = self.create_publisher(
-                OffboardControlMode, '/fmu/in/offboard_control_mode', 10)
+                OffboardControlMode, '/uav_2/fmu/in/offboard_control_mode', 10)
             self.rates_pub = self.create_publisher(
-                VehicleRatesSetpoint, '/fmu/in/vehicle_rates_setpoint', 10)
+                VehicleRatesSetpoint, '/uav_2/fmu/in/vehicle_rates_setpoint', 10)
             self.get_logger().warning(
                 'STREAM MODE: publishing zero-thrust Offboard heartbeat at 20 Hz. '
                 'No arm command will be sent.')
@@ -180,7 +180,7 @@ class PreflightCheck(Node):
         """Match /fmu/out/<base> or /fmu/out/<base>_vN."""
         match = None
         for name in available:
-            tail = name[len('/fmu/out/'):]
+            tail = name[len('/uav_2/fmu/out/'):]
             if tail == base or (tail.startswith(base + '_v') and tail[len(base) + 2:].isdigit()):
                 match = name
                 break
@@ -420,6 +420,19 @@ class PreflightCheck(Node):
         # ---- rangefinder fusion. On this airframe EKF2_HGT_REF=2 (Range), so
         # dist_bottom_valid is pinned false by construction and the cs_rng_*
         # flags are the only honest answer. See offboard_takeoff.
+        if self.est_flags is None:
+            p('')
+            p('RANGEFINDER FUSION')
+            p('  estimator_status_flags NOT PUBLISHED.')
+            p('  The flight nodes use it to answer "is EKF2 actually FUSING the')
+            p('  rangefinder?" -- dist_bottom_valid alone cannot. Without it they')
+            p('  refuse to take off whenever dist_bottom_valid is false, because')
+            p('  there is no second opinion on the height.')
+            p('  Add this to PX4 /etc/uxrce_dds_client/dds_topics.yaml, reboot the FC:')
+            p('      - topic: /fmu/out/estimator_status_flags')
+            p('        type: px4_msgs::msg::EstimatorStatusFlags')
+            warnings.append('estimator_status_flags not published -- rangefinder '
+                            'fusion cannot be confirmed')
         if self.est_flags is not None:
             ef = self.est_flags
             p('')

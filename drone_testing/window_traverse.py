@@ -843,6 +843,11 @@ class WindowTraverse(WindowScan):
         self.HARD_CLEARANCE = float(self._declare_number(
             'hard_clearance', self.HARD_CLEARANCE))
         self.SILL_BIAS = float(self._declare_number('sill_bias', self.SILL_BIAS))
+        # NaN = the airframe-centred rule above. A number = window centre plus
+        # this many metres, e.g. 0.10 to aim just above the centre.
+        self.TRAVERSE_CENTRE_OFFSET = float(self._declare_number(
+            'traverse_centre_offset', getattr(self, 'TRAVERSE_CENTRE_OFFSET',
+                                              float('nan'))))
         self.ALIGN_ALT_TOLERANCE = float(self._declare_number(
             'align_alt_tolerance', self.ALIGN_ALT_TOLERANCE))
         self.APPROACH_SPEED = float(self._declare_number(
@@ -967,7 +972,7 @@ class WindowTraverse(WindowScan):
         # The callback decimates to ATTITUDE_MAX_HZ; see attitude_callback.
         self.attitude_min_interval = 1.0 / self.ATTITUDE_MAX_HZ
         self.attitude_last_kept = 0.0
-        self.create_subscription(VehicleAttitude, '/fmu/out/vehicle_attitude',
+        self.create_subscription(VehicleAttitude, '/uav_2/fmu/out/vehicle_attitude',
                                  self.attitude_callback, qos_profile=sensor_qos,
                                  callback_group=self.sensor_cbg)
 
@@ -1367,6 +1372,17 @@ class WindowTraverse(WindowScan):
         # Airframe centred in the aperture: the commanded point sits
         # (body_below - body_above)/2 above the window centre.
         wanted = centre + 0.5 * (self.body_below - self.body_above) + self.SILL_BIAS
+
+        if math.isfinite(self.TRAVERSE_CENTRE_OFFSET):
+            # Explicit rule: the window centre plus a fixed offset (part 2
+            # aims 0.10 m above centre), kept inside the hard-clearance band
+            # so the gear still clears the sill and the top the lintel.
+            wanted = centre + self.TRAVERSE_CENTRE_OFFSET
+            lo = sill + self.body_below + self.HARD_CLEARANCE
+            hi = lintel - self.body_above - self.HARD_CLEARANCE
+            if hi >= lo:
+                wanted = min(max(wanted, lo), hi)
+            lower, upper = wanted, wanted
 
         if lower > upper:
             # Not enough room for the full clearance either side. Take the

@@ -1,5 +1,6 @@
 """
-Window scan launch: uXRCE-DDS agent + RealSense + window detection + the flight.
+Window scan launch: window detection + the flight. The uXRCE-DDS agent and
+the RealSense (colour + aligned depth) come from imav_bringup; start that first.
 
     arm -> climb to takeoff_altitude -> hold -> sweep the nose through a
     90 degree arc until the D435i sees the window -> lock the yaw and the
@@ -15,8 +16,7 @@ and the topic names before anything spins:
     ros2 topic echo /window_detected
     ros2 run rqt_image_view rqt_image_view /window_detection/image
 
-Flight. The default starts the agent, the camera and the detector but NOT the
-flight node, so you can run that one by hand and keep the q/k keyboard
+Flight. The default starts the detector but NOT the flight node, so you can run that one by hand and keep the q/k keyboard
 aborts (a node started by launch has no tty, so those keys are dead):
 
     ros2 launch drone_testing window_scan.launch.py
@@ -28,10 +28,10 @@ works, and it is the one that matters):
 
     ros2 launch drone_testing window_scan.launch.py agent_only:=false
 
-PORTED FROM THE ZED TO THE REALSENSE D435i. If realsense2_camera is already
-running from another launch file (the RTAB-Map stack, say), add camera:=false
-so this one does not start a second copy -- librealsense will refuse the
-device rather than share it, and the failure looks like a dead camera.
+PORTED FROM THE ZED TO THE REALSENSE D435i. The camera is the one the VIO
+stack in imav_bringup opens (it needs vio.extra_args enable_color:=true
+align_depth:=true); this file never starts a second copy, because librealsense
+refuses the device rather than share it.
 
 CHECK THE IMAGE TOPIC FIRST. The defaults are the realsense2_camera names
 under the default /camera/camera namespace:
@@ -44,175 +44,15 @@ below for why that is not a preference.
 """
 
 from launch import LaunchDescription
-from launch.actions import (DeclareLaunchArgument, ExecuteProcess, GroupAction,
-                            IncludeLaunchDescription, TimerAction)
+from launch.actions import DeclareLaunchArgument, GroupAction, TimerAction
 from launch.conditions import IfCondition, UnlessCondition
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
     agent_only = LaunchConfiguration('agent_only')
     flight = LaunchConfiguration('flight')
-
-    # The uXRCE-DDS agent.
-    #
-    # ExecuteProcess on the STANDALONE BINARY, not a Node on the
-    # micro_ros_agent package. There is no micro_ros_agent binary package for
-    # ROS 2 Jazzy (it existed for Humble), so `package='micro_ros_agent'`
-    # fails at launch time with "package not found" on this Jetson -- and it
-    # fails only on a flight launch, because flight:=false never starts the
-    # agent. The agent built from source lives at /usr/local/bin/MicroXRCEAgent
-    # and takes the same arguments.
-    #
-    # agent_cmd / agent_dev / agent_baud are launch arguments so a machine
-    # that DOES have the ROS package, or a different port, needs no edit.
-    microxrce_node = ExecuteProcess(
-        cmd=[LaunchConfiguration('agent_cmd'), 'serial',
-             '--dev', LaunchConfiguration('agent_dev'),
-             '-b', LaunchConfiguration('agent_baud')],
-        name='micro_xrce_dds_agent',
-        output='screen',
-    )
-
-    # The camera driver. Skipped with camera:=false if you already have one up.
-    #
-    # align_depth.enable is required, not optional: without it the
-    # aligned_depth_to_color topic does not exist and the detector reports a
-    # window with no distances. enable_color is required because the detection
-    # is an HSV threshold and the infra streams are monochrome. See the same
-    # block in window_traverse.launch.py for the full reasoning.
-    # WRAPPED IN A SCOPED, NON-FORWARDING GroupAction. This is not cosmetic.
-    #
-    # rs_launch.py warns about every launch configuration it can see that is
-    # not one of its own:
-    #
-    #     for param_name in context.launch_configurations.keys():
-    #         if param_name not in supported_params:
-    #             print("Warning: Parameter '<name>' is not supported...")
-    #
-    # and IncludeLaunchDescription FORWARDS the parent's configurations into
-    # the included description by default. So every argument this file
-    # declares -- lcd, agent_only, takeoff_altitude, scan_span_deg, ... --
-    # arrived in rs_launch.py's context and produced a screenful of warnings
-    # with the full supported-parameter list repeated after each one. They
-    # were harmless, but they buried the actual startup log.
-    #
-    # scoped=True gives the include its own configuration scope;
-    # forwarding=False stops the parent's configurations entering it. What
-    # rs_launch.py then sees is exactly the launch_arguments below, all of
-    # which it supports, and the warnings go away.
-    camera_launch = GroupAction(
-        scoped=True,
-        forwarding=False,
-        launch_configurations={
-            # forwarding=False hides the parent's configurations from this
-            # scope -- including from our own substitutions -- so anything the
-            # include needs from outside has to be mapped in HERE. Keyed by
-            # rs_launch.py's own parameter names, so its unsupported-parameter
-            # check stays quiet.
-            'camera_name': LaunchConfiguration('camera_name'),
-            'camera_namespace': LaunchConfiguration('camera_namespace'),
-            'rgb_camera.color_profile': LaunchConfiguration('color_profile'),
-            'depth_module.depth_profile': LaunchConfiguration('depth_profile'),
-            'decimation_filter.enable': LaunchConfiguration('decimation_filter'),
-            'spatial_filter.enable': LaunchConfiguration('spatial_filter'),
-            'temporal_filter.enable': LaunchConfiguration('temporal_filter'),
-            'hole_filling_filter.enable': LaunchConfiguration('hole_filling'),
-            'accelerate_gpu_with_glsl': LaunchConfiguration('gpu_glsl'),
-        },
-        condition=IfCondition(LaunchConfiguration('camera')),
-        actions=[
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(PathJoinSubstitution([
-                    FindPackageShare('realsense2_camera'),
-                    'launch', 'rs_launch.py'])),
-                launch_arguments={
-                    'enable_color': 'true',
-                    'enable_depth': 'true',
-                    'align_depth.enable': 'true',
-                    'enable_infra1': 'false',
-                    'enable_infra2': 'false',
-                    'enable_gyro': 'false',
-                    'enable_accel': 'false',
-                    'pointcloud.enable': 'false',
-                    'publish_tf': 'false',
-                }.items(),
-            ),
-        ],
-    )
-
-    # The IR projector, set AFTER the node is up.
-    #
-    # depth_module.emitter_enabled is NOT a launch argument of rs_launch.py --
-    # it is not in its configurable_parameters list, so passing it there did
-    # nothing except produce one of the warnings above. It IS a runtime ROS
-    # parameter on the camera node, so the only way to set it from a launch
-    # file is to set it after the node exists.
-    #
-    # Default 1 (ON). The arena is indoors and a window frame is a low-texture
-    # edge, which is the case passive stereo is worst at; the dots are
-    # invisible to the colour sensor so the HSV detection is unaffected. Set
-    # emitter:=0 if the projector is washing out a close-range target.
-    emitter_set = TimerAction(
-        # 12 s, not 8: `ros2 param set` fails outright if the node is not up
-        # yet, and librealsense took 8.7 s to reach "RealSense Node Is Up!" on
-        # this Jetson. 8 s worked but with no margin, and the failure is
-        # silent in the sense that the emitter just stays at its default.
-        period=12.0,
-        actions=[
-            ExecuteProcess(
-                cmd=['ros2', 'param', 'set',
-                     ['/', LaunchConfiguration('camera_namespace'),
-                      '/', LaunchConfiguration('camera_name')],
-                     'depth_module.emitter_enabled',
-                     LaunchConfiguration('emitter')],
-                output='screen',
-            ),
-            # Global time, set here for the same reason as the emitter: it is
-            # a runtime parameter, not an rs_launch.py argument.
-            #
-            # This is what produces the recurring
-            #     messenger-libusb.cpp:42 control_transfer returned error,
-            #     index: 768, error: Resource temporarily unavailable
-            # warnings. global_time_enabled starts librealsense's
-            # time_diff_keeper thread, which keeps re-reading the device
-            # hardware clock over a UVC extension-unit control transfer so it
-            # can express frame stamps in the host clock. On this Jetson that
-            # control transfer intermittently returns EAGAIN and librealsense
-            # logs it -- the stream itself is unaffected, but it is noise on
-            # every run, and it is the same polling that escalated to the
-            # "time_diff_keeper polling: usb device disconnected" errors in
-            # 2026-09-12-15_50_02.log.
-            #
-            # Safe to turn off HERE specifically: nothing in this launch reads
-            # image header stamps. window_detect ages its depth frame with
-            # time.monotonic() taken at receipt (window_detect.py:753), and
-            # publish_tf is already false, so the stamp domain is unused. If
-            # you add a node that does compare stamps to ROS time -- a VIO
-            # bridge, a TF consumer, message_filters sync against another
-            # sensor -- set global_time:=true and live with the warning.
-            ExecuteProcess(
-                cmd=['ros2', 'param', 'set',
-                     ['/', LaunchConfiguration('camera_namespace'),
-                      '/', LaunchConfiguration('camera_name')],
-                     'depth_module.global_time_enabled',
-                     LaunchConfiguration('global_time')],
-                output='screen',
-            ),
-            ExecuteProcess(
-                cmd=['ros2', 'param', 'set',
-                     ['/', LaunchConfiguration('camera_namespace'),
-                      '/', LaunchConfiguration('camera_name')],
-                     'rgb_camera.global_time_enabled',
-                     LaunchConfiguration('global_time')],
-                output='screen',
-            ),
-        ],
-        condition=IfCondition(LaunchConfiguration('camera')),
-    )
 
     # Detection. Delayed a little: librealsense takes a few seconds to open the
     # camera, and starting the detector into a topic that does not exist yet
@@ -297,7 +137,7 @@ def generate_launch_description():
         condition=UnlessCondition(agent_only),
     )
 
-    # Status on the Arduino TFT. Started with the agent so the screen is alive
+    # Status on the Arduino TFT. Started at launch so the screen is alive
     # from boot; it also shows the window detection on row 4 by itself.
     lcd_node = Node(
         package='drone_testing',
@@ -312,112 +152,18 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'agent_only', default_value='true',
-            description='Start the agent, the camera and the detector but not the '
+            description='Start the detector but not the '
                         'flight node, so you can run that by hand and keep the '
                         'q/k keyboard aborts. false = fly the whole thing.'),
         DeclareLaunchArgument(
             'flight', default_value='true',
-            description='false = camera and detection only: no DDS agent, no '
+            description='false = detection only: no '
                         'flight node. Use this for the bench test.'),
         DeclareLaunchArgument(
             'detect', default_value='true',
             description='Start the window_detect node.'),
-        DeclareLaunchArgument(
-            'agent_cmd', default_value='MicroXRCEAgent',
-            description='The uXRCE-DDS agent binary. Default is the one built '
-                        'from source at /usr/local/bin/MicroXRCEAgent -- there '
-                        'is no micro_ros_agent ROS package for Jazzy. Check '
-                        'with `which MicroXRCEAgent`.'),
-        DeclareLaunchArgument(
-            'agent_dev', default_value='/dev/ttyTHS1',
-            description='Serial port the Pixhawk is on.'),
-        DeclareLaunchArgument(
-            'agent_baud', default_value='921600',
-            description='Must match SER_TEL2_BAUD (or your port) on PX4.'),
-        # ---- depth post-processing --------------------------------------
-        # All off by default. Each of these trades something away, and for a
-        # thin window frame measured by a node whose whole outlier strategy
-        # assumes the depth is raw, the trades are mostly bad ones.
-        DeclareLaunchArgument(
-            'emitter', default_value='1',
-            description='IR projector: 1 on, 0 off. ON by default -- a window '
-                        'frame is a low-texture edge and the dots are what '
-                        'give passive stereo something to match. Invisible to '
-                        'the colour sensor, so the HSV detection does not '
-                        'care. Applied by `ros2 param set` after startup, '
-                        'because it is not an rs_launch.py argument.'),
-        DeclareLaunchArgument(
-            'global_time', default_value='false',
-            description='librealsense host-clock frame stamps. OFF by default: '
-                        'the polling thread behind it is what emits the '
-                        'recurring "control_transfer returned error ... '
-                        'Resource temporarily unavailable" warnings, and '
-                        'nothing in this launch reads image header stamps. '
-                        'Set true if you add a node that does (VIO bridge, TF '
-                        'consumer, message_filters sync).'),
-        DeclareLaunchArgument(
-            'hole_filling', default_value='false',
-            description='LEAVE THIS FALSE. The hole-filling filter invents '
-                        'depth for pixels that have none by copying from '
-                        'their neighbours. On a window the holes ARE the '
-                        'aperture, so it fills them with the frame or the '
-                        'wall behind -- fabricating exactly the outlier that '
-                        'window_traverse\'s corner-spread and planarity '
-                        'filters exist to reject, but making it look '
-                        'self-consistent so they no longer can. It converts '
-                        'a detectable failure into an undetectable one.'),
-        DeclareLaunchArgument(
-            'decimation_filter', default_value='false',
-            description='Downsamples depth (848x480 -> 424x240). Good for '
-                        'large flat surfaces, wrong here: a window frame is '
-                        'only a few pixels wide at 3 m and decimation blends '
-                        'it into the background it is being distinguished '
-                        'from.'),
-        DeclareLaunchArgument(
-            'spatial_filter', default_value='false',
-            description='Edge-preserving smoothing; fills small holes. The '
-                        'least harmful of the four and worth TRYING if the '
-                        'rejection tally says "corner depth missing" a lot. '
-                        'Try it before hole filling, and re-check the '
-                        'reconstructed window size against a tape measure '
-                        'afterwards -- smoothing across the frame edge shows '
-                        'up as an aperture that measures slightly wrong.'),
-        DeclareLaunchArgument(
-            'temporal_filter', default_value='false',
-            description='Averages depth across frames. Helps a stationary '
-                        'camera, hurts a moving one -- it lags the approach '
-                        'and smears the frame along the direction of travel. '
-                        'Off.'),
-        DeclareLaunchArgument(
-            'gpu_glsl', default_value='false',
-            description='accelerate_gpu_with_glsl. Moves alignment onto the '
-                        'Jetson GPU. Off by default because it needs a usable '
-                        'GL context and fails awkwardly on a headless boot; '
-                        'try it if the alignment is costing too much CPU, and '
-                        'verify the aligned topic still publishes.'),
-
-        DeclareLaunchArgument(
-            'camera', default_value='true',
-            description='Start realsense2_camera. false if it is already '
-                        'running.'),
-        DeclareLaunchArgument(
-            'zed', default_value='true',
-            description='DEPRECATED alias, ignored. The camera is a RealSense '
-                        'D435i now; use camera:=false.'),
-        DeclareLaunchArgument(
-            'camera_name', default_value='camera',
-            description='realsense2_camera node name. With camera_namespace '
-                        'this is what makes the topics /camera/camera/...'),
-        DeclareLaunchArgument(
-            'camera_namespace', default_value='camera',
-            description='Namespace the driver publishes under.'),
-        DeclareLaunchArgument(
-            'color_profile', default_value='1280x720x30',
-            description='D435i colour stream, WxHxFPS.'),
-        DeclareLaunchArgument(
-            'depth_profile', default_value='848x480x30',
-            description='D435i depth stream, WxHxFPS. 848x480 is the depth '
-                        'imager\'s native resolution.'),
+        # ---- camera topics. The RealSense itself (colour + aligned depth,
+        # emitter, filters, clock) is started by imav_bringup's VIO stack. ----
         DeclareLaunchArgument(
             'image_topic', default_value='/camera/camera/color/image_raw',
             description='Colour image, rgb8 on the D435i. Check yours with '
@@ -519,7 +265,7 @@ def generate_launch_description():
             'max_altitude', default_value='3.0',
             description='m above the arming point the flight may not exceed.'),
         DeclareLaunchArgument(
-            'request_offboard_from_ros', default_value='true',
+            'request_offboard_from_ros', default_value='false',
             description='false = you flip the Offboard switch on the TX.'),
         DeclareLaunchArgument(
             'reboot_fc', default_value='false',
@@ -545,9 +291,7 @@ def generate_launch_description():
         # actions are grouped rather than given a condition directly, because
         # two of them already carry one of their own and an action's condition
         # is fixed when it is built.
-        GroupAction([microxrce_node, lcd_node, reboot_node, scan_node],
+        GroupAction([lcd_node, reboot_node, scan_node],
                     condition=IfCondition(flight)),
-        camera_launch,
-        emitter_set,
         detect_node,
     ])

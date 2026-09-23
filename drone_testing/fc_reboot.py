@@ -103,13 +103,13 @@ class FcReboot(Node):
         )
 
         self.command_pub = self.create_publisher(
-            VehicleCommand, '/fmu/in/vehicle_command', 10)
+            VehicleCommand, '/uav_2/fmu/in/vehicle_command', 10)
 
         self.status_subs = subscribe_versioned(
             self, VehicleStatus, 'vehicle_status', self.status_callback,
             sensor_qos)
         self.create_subscription(EstimatorStatusFlags,
-                                 '/fmu/out/estimator_status_flags',
+                                 '/uav_2/fmu/out/estimator_status_flags',
                                  self.flags_callback, qos_profile=sensor_qos)
         self.position_subs = subscribe_versioned(
             self, VehicleLocalPosition, 'vehicle_local_position',

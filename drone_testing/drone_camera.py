@@ -28,9 +28,11 @@ class MissionPlanner(Node):
         self.TAKEOFF_VELOCITY_Z = -1.0 # m/s (negative is up)
         
         # --- Publishers ---
-        self.offboard_control_mode_pub = self.create_publisher(OffboardControlMode, '/fmu/in/offboard_control_mode', 10)
-        self.vehicle_command_pub = self.create_publisher(VehicleCommand, '/fmu/in/vehicle_command', 10)
-        self.trajectory_setpoint_pub = self.create_publisher(TrajectorySetpoint, '/fmu/in/trajectory_setpoint', 10)
+        self.offboard_control_mode_pub = self.create_publisher(OffboardControlMode, '/uav_2/fmu/in/offboard_control_mode', 10)
+        self.vehicle_command_pub = self.create_publisher(VehicleCommand, '/uav_2/fmu/in/vehicle_command', 10)
+        self.trajectory_setpoint_pub = self.create_publisher(TrajectorySetpoint, '/uav_2/fmu/in/trajectory_setpoint', 10)
+        self.vehicle_command_pub = self.create_publisher(VehicleCommand, '/uav_2/fmu/in/vehicle_command', 10)
+        self.trajectory_setpoint_pub = self.create_publisher(TrajectorySetpoint, '/uav_2/fmu/in/trajectory_setpoint', 10)
 
         # --- Subscribers ---
         self.vehicle_status_subs = subscribe_versioned(self, VehicleStatus, 'vehicle_status', self.vehicle_status_callback, qos_profile)

@@ -456,6 +456,10 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
             'room_altitude', self.ROOM_ALTITUDE))
         self.ALT_CHANGE_TIMEOUT = float(self._declare_number(
             'alt_change_timeout', self.ALT_CHANGE_TIMEOUT))
+        self.GENTLE_CLIMB_ALT = float(self._declare_number(
+            'gentle_climb_alt', self.GENTLE_CLIMB_ALT))
+        self.GENTLE_CLIMB_SPEED = float(self._declare_number(
+            'gentle_climb_speed', self.GENTLE_CLIMB_SPEED))
         self.WINDOW_SEARCH_SECONDS = float(self._declare_number(
             'window_search_seconds', self.WINDOW_SEARCH_SECONDS))
         self.WINDOW_SWEEP_DEG = float(self._declare_number(
@@ -580,6 +584,10 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
 
         self.alt_next = None        # what to run once ALT_CHANGE arrives
         self.alt_target = None      # m, the altitude it is climbing to
+        self._climb_speed_full = None   # climb_speed outside the first metre
+        self.pad_marker_ned = None      # the pad marker's NED position
+        self._dup_timer = self.create_timer(
+            3.0, self._check_for_a_second_flight_node)
         self.room_alt_set = False   # has the room pattern's height been
                                     # commanded yet? See _begin_room.
         self.leg_retries = 0        # elevated searches flown on this leg
@@ -649,8 +657,8 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
             self.create_subscription(VehicleAttitude, topic,
                                      self.attitude_callback,
                                      qos_profile=attitude_qos)
-            for topic in ('/fmu/out/vehicle_attitude',
-                          '/fmu/out/vehicle_attitude_v1')
+            for topic in ('/uav_2/fmu/out/vehicle_attitude',
+                          '/uav_2/fmu/out/vehicle_attitude_v1')
         ]
 
         # The lidar tile scan's own parameters and subscriptions. Declared
@@ -1033,6 +1041,96 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
         allowance itself."""
         ideal = leg.distance / max(self.LEG_SPEED, 0.01)
         return ideal + self.LEG_TIMEOUT_MARGIN
+
+    # ------------------------------------------------- the climb, on the pad
+
+    TAKEOFF_MARKER_HOLD = True  # hold x/y on the marker UNDER the aircraft
+    TAKEOFF_MARKER_RADIUS = 1.0 # m: further than this is a different pad
+    GENTLE_CLIMB_ALT = 1.00     # m of climb flown at GENTLE_CLIMB_SPEED
+    GENTLE_CLIMB_SPEED = 0.30   # m/s. The first metre is where ground effect
+                                # is strongest and the flow is worst, so it is
+                                # flown slowly: less disturbance to reject
+                                # while the estimator has least to say. Above
+                                # that the normal climb_speed takes over.
+
+    def _check_for_a_second_flight_node(self):
+        """Is something else already streaming setpoints to this vehicle?
+
+        Two flight nodes on /fmu/in/trajectory_setpoint is a race whose
+        winner changes with scheduling: PX4 takes whichever message arrived
+        last, so the aircraft flies half of each plan. It is also what makes
+        a start look hung -- the older node holds Offboard, this one waits,
+        and killing the old one lets this one arm "suddenly".
+
+        Reported, loudly, once, 3 s after startup (DDS discovery is not
+        instant). Not fatal: refusing to fly on a discovery hiccup would be
+        worse than saying so.
+        """
+        self._dup_timer.cancel()
+        from drone_testing.px4_topics import versioned_names
+        topic = versioned_names('x')[0][:-1].replace('/out/', '/in/') \
+            + 'trajectory_setpoint'
+        others = self.count_publishers(topic) - 1      # ourselves
+        if others > 0:
+            self.get_logger().error(
+                f"ANOTHER FLIGHT NODE IS PUBLISHING on {topic} "
+                f"({others} besides this one). PX4 takes whichever setpoint "
+                "arrived last, so the two will fight and this node may look "
+                "hung until the other is killed. Stop the other one "
+                "(pgrep -af 'mission_fsm|window_traverse') and start again.")
+        else:
+            self.get_logger().info(f"Setpoint stream {topic} is ours alone.")
+
+    def _takeoff_marker_id(self):
+        return self.WINDOW_MARKER_ID
+
+    def _handle_takeoff(self):
+        """Climb straight up, held on the marker the aircraft took off from.
+
+        Optical flow is at its worst exactly here: below flow_min_agl EKF2 has
+        no usable x/y, hold_xy never latches, and the climb is flown on a
+        zero-VELOCITY hold -- which holds nothing, it only asks for no motion
+        and lets the drift through. The pad marker is in the down camera the
+        whole way up, and marker_offset_ned() is a MEASURED vector to it, so
+        the climb can be flown as station keeping over it instead: the same
+        loop the precision landing uses, pointed the other way.
+
+        Guarded by radius: another pad with the same id further away is not
+        this one, and flying to it would be worse than drifting.
+        """
+        # The first metre, gently. Restored the moment it is past.
+        rel = self.relative_altitude()
+        if rel is not None and self.GENTLE_CLIMB_ALT > 0.0:
+            if self._climb_speed_full is None:
+                self._climb_speed_full = self.CLIMB_SPEED
+            gentle = rel < self.GENTLE_CLIMB_ALT
+            want = (min(self.GENTLE_CLIMB_SPEED, self._climb_speed_full)
+                    if gentle else self._climb_speed_full)
+            if want != self.CLIMB_SPEED:
+                self.CLIMB_SPEED = want
+                self.get_logger().info(
+                    f"Climb speed {want:.2f} m/s "
+                    + ("(the first metre, gently)" if gentle
+                       else "(clear of the ground, normal)"))
+        if self.TAKEOFF_MARKER_HOLD:
+            if self.target_marker_id is None:
+                self.target_marker_id = self._takeoff_marker_id()
+            off = self.marker_offset_ned()
+            lp = self.local_position
+            if (off is not None and lp is not None
+                    and math.hypot(off[0], off[1]) <= self.TAKEOFF_MARKER_RADIUS):
+                self.hold_x = float(lp.x + off[0])
+                self.hold_y = float(lp.y + off[1])
+                # Where the PAD is, in NED. The pad sits on our lane, so this
+                # is the lane's own line -- the only reference that survives a
+                # drift during the climb, because it is measured, not assumed.
+                self.pad_marker_ned = (self.hold_x, self.hold_y)
+                self.hold_xy = True
+                self.get_logger().info(
+                    f"Climbing on marker id {self.target_marker_id}: it is "
+                    f"{math.hypot(off[0], off[1]) * 100:.0f} cm away, holding "
+                    "over it.", throttle_duration_sec=1.0)
+        super()._handle_takeoff()
 
     def _handle_cruise(self):
         if not self._still_flyable():
@@ -1906,7 +2004,7 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
 
     def _escalate_window_search(self):
         """One rung up the ladder. Rung 1 sweeps; the rest back off."""
-        if self.window_rung == 0:
+        if self.window_rung == 0 and self.WINDOW_SWEEP_DEG > 0.0:
             # Rung 1: yaw left, centre, right. This is SCAN's own sweep, which
             # window_traverse disables by setting the span to zero. SCAN_SPAN
             # is the TOTAL arc, so +/-30 deg is a 60 deg span.
@@ -2147,7 +2245,7 @@ class MissionFSM(WindowRoomTraverse, LidarRoomScan):
                 'return': 'TO_MARKER',
                 'turn': 'TO_TURN',
                 'pad': 'TO_PAD',
-            }[leg.name]
+            }.get(leg.name, leg.name.upper())
         return super()._phase_label()
 
     def publish_status(self):

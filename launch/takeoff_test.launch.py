@@ -1,12 +1,13 @@
 """
-Takeoff test launch: uXRCE-DDS agent + the offboard_takeoff node.
+Takeoff test launch: the offboard_takeoff node (the uXRCE-DDS agent
+comes from imav_bringup).
 
 No ZED, no localization -- the flight relies only on ARK Flow + lidar +
 IMU fused in PX4, so there is nothing else to go wrong.
 
 NOTE: launching the takeoff node this way means stdin is not a tty, so the
 'q' / 'k' keyboard aborts will be DISABLED. For every test where the props
-are on, launch the agent only (the default) and run the node by hand in a
+are on, launch the support stack only (the default) and run the node by hand in a
 second tmux pane so you keep the abort keys:
 
     ros2 launch drone_testing takeoff_test.launch.py
@@ -25,14 +26,6 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     agent_only = LaunchConfiguration('agent_only')
-
-    microxrce_node = Node(
-        package='micro_ros_agent',
-        executable='micro_ros_agent',
-        name='micro_xrce_dds_agent',
-        output='screen',
-        arguments=['serial', '--dev', '/dev/ttyTHS1', '-b', '921600'],
-    )
 
     # PX4 finishes creating its publishers ~7 s after the agent comes up:
     # ~6 s for the session handshake, then ~1 s to enumerate all 65 topics.
@@ -61,7 +54,7 @@ def generate_launch_description():
         condition=UnlessCondition(agent_only),
     )
 
-    # Status readout on the Arduino-driven LCD. Started with the agent, not
+    # Status readout on the Arduino-driven LCD. Started at launch, not
     # with the flight node, so the display is alive from boot and can show
     # "NO TAKEOFF NODE" while you are still getting set up.
     lcd_node = Node(
@@ -77,7 +70,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'agent_only', default_value='true',
-            description='Start only the uXRCE-DDS agent; run the takeoff node manually '
+            description='Do not start the takeoff node; run it manually '
                         'so the q/k keyboard aborts stay available.'),
         DeclareLaunchArgument(
             'takeoff_altitude', default_value='0.80',
@@ -95,7 +88,7 @@ def generate_launch_description():
             'land_speed', default_value='0.15',
             description='m/s the descent setpoint is ramped at.'),
         DeclareLaunchArgument(
-            'request_offboard_from_ros', default_value='true',
+            'request_offboard_from_ros', default_value='false',
             description='false = you flip the Offboard switch on the TX yourself.'),
         DeclareLaunchArgument(
             'lcd', default_value='false',
@@ -103,7 +96,6 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'lcd_port', default_value='',
             description='Arduino serial port; empty = auto-detect ttyACM*/ttyUSB*.'),
-        microxrce_node,
         lcd_node,
         takeoff_node,
     ])

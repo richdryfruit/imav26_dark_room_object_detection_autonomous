@@ -493,7 +493,7 @@ class RingGrab(WindowScan):
         self.attitude_time = None
         self.attitude_min_interval = 1.0 / self.ATTITUDE_MAX_HZ
         self.attitude_last_kept = 0.0
-        self.create_subscription(VehicleAttitude, '/fmu/out/vehicle_attitude',
+        self.create_subscription(VehicleAttitude, '/uav_2/fmu/out/vehicle_attitude',
                                  self.attitude_callback, qos_profile=sensor_qos,
                                  callback_group=self.sensor_cbg)
 

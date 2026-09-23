@@ -1,0 +1,95 @@
+# THE WHOLE MISSION IN ONE FLIGHT (mission_fsm_full). Loaded by the flight node:
+#   ros2 run drone_testing mission_fsm_full --ros-args --params-file \
+#     $(ros2 pkg prefix drone_testing)/share/drone_testing/config/hw_full.yaml
+# (mission_fsm_full.launch.py agent_only:=false loads it too, via hw_params.)
+/**:
+  ros__parameters:
+    # THE PILOT OWNS MODE AND ARMING: both come from the transmitter (or
+    # the imav_bringup dashboard). The node streams setpoints and waits.
+    request_offboard_from_ros: false
+    arm_from_ros: false
+
+    lateral_source: flow          # PMW3901 optical flow (x/y) + TFmini (z)
+    rangefinder_checks: true
+
+    # ---- the course, measured -----------------------------------------
+    # ---- ArUco ids (change these, nothing else, if the ids move) ------
+    window_marker_id: 0           # 80 x 80 cm ArUco, 1.67 m from the wall
+    pad_marker_id: 0              # aruco_pose's own /aruco/point id
+    window_offset: 0.15           # m LEFT, marker -> blue window axis
+    window_offset_direction: left
+    standoff_distance: 1.67
+    inside_distance: 0.80
+    outside_distance: 1.67
+    cruise_altitude: 2.50         # climb + the carpet-track leg (as
+                                  # track_traversal_node flies it)
+    outbound_distance: 9.3        # LIMIT for that leg; no landing on it
+    window_altitude_m: 1.75
+    room_altitude: 1.75
+    max_altitude: 3.0
+    flight_seconds: 660.0
+
+    # ---- the blue window: 60 x 60 cm opening --------------------------
+    color: blue                   # read by window_detect (launch sets it too)
+    window_min_size: 0.45         # the red 40 x 40 one is also rejected here
+    window_max_size: 0.80
+    traverse_centre_offset: 0.07  # m ABOVE the window centre. The lidar sits
+                                  # 13.5 cm higher, so its plane is 20.5 cm
+                                  # above centre with 9.5 cm to the top edge
+                                  # (~3 deg of pitch). -0.05 is the robust
+                                  # alternative; see mission_fsm_part2.py.
+    window_sweep_deg: 0.0         # no yaw sweep: slow 30 cm backoffs instead
+    window_backoff: 0.30
+    window_max_backoffs: 2
+    recentre_backoff: 0.30
+    recentre_max_backoffs: 2
+    backoff_budget: 2
+    backoff_speed: 0.15
+
+    # ---- RealSense (window camera) mounting, as the launch files ------
+    cam_x: 0.105
+    cam_y: 0.0
+    cam_z: -0.04
+    cam_roll: 0.0
+    cam_pitch: 0.0
+    cam_yaw: 0.0
+    exit_cam_x: 0.105
+
+    # ---- the dark room: 2.5 x 2.5 m, flown on the 2D lidar -------------
+    room_mode: lidar
+    room_x: 2.5
+    room_y: 2.5
+    arena_origin: corner          # wall_localizer's SW interior corner
+    front_wall: south             # the window wall
+    y_axis: left
+    room_scan_sequence: "forward 0.5, right 0.5, backward 0.5, left 0.5, yaw 180"
+    relock_standoff: 1.25         # exit search from the room centre line:
+                                  # whole window in the RealSense frame
+    lidar_closed_loop: true
+    dwell_s: 3.0
+    transform_drift_max: 0.5
+
+    # ---- the way out: window re-found from inside ---------------------
+    exit_mode: detect
+
+    # ---- the carpet track (track_traversal_node's law) -----------------
+    follow_line: true
+    track_speed: 0.6              # m/s forward, and the cap on |(vx, vy)|
+    track_max_lat: 0.30           # m/s of lateral correction
+    track_max_yaw: 0.50           # rad/s
+    track_vertical_tol_deg: 10.0  # forward only inside this tilt
+    line_trust: 0.80              # of a half-frame: further out is another lane
+    # MEASURED CAGE GEOMETRY: our lane 0.60 m wide, the CENTRE lane 1.20 m
+    # and carrying the obstacles, lane spacing 1.50 m between centres (the
+    # drawing's '1502,5'), so 0.60 m of bare floor between lane edges.
+    track_width_m: 0.60
+    track_width_tol: 0.25         # accepts 0.45-0.75 m, rejects 1.20
+    track_hfov_deg: 70.4          # the C920's; calibrate_camera prints the real one
+    track_lane_guard: 0.60
+
+    # ---- speeds --------------------------------------------------------
+    leg_speed: 0.6                # m/s on the straight legs and strafes
+    traverse_speed: 0.6           # m/s through the window
+    approach_speed: 0.30          # m/s onto the standoff point (unchanged)
+    speed: 0.35                   # m/s between room points (precision)
+    room_yaw_rate: 0.12           # rad/s (~7 deg/s) for the half turn

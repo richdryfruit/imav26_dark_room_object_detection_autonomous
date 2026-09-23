@@ -149,7 +149,8 @@ defines twist in the child_frame_id frame (the body, FLU), so it must be publish
 as VELOCITY_FRAME_BODY_FRD, not as an NED velocity. If you turn it on, that
 is what this node does.
 
-See also the PX4 parameter notes in launch/sequence_vio_test.launch.py.
+See also the PX4 parameter notes in launch/sequence_vio_realsense.launch.py
+(the ZED launch file, sequence_vio_test.launch.py, has been removed).
 """
 
 import math
@@ -318,7 +319,7 @@ class ZedLocalization(Node):
             Odometry, self.odom_topic, self.zed_odom_callback,
             qos_profile_sensor_data)
         self.visual_odom_pub = self.create_publisher(
-            VehicleOdometry, '/fmu/in/vehicle_visual_odometry', px4_qos)
+            VehicleOdometry, '/uav_2/fmu/in/vehicle_visual_odometry', px4_qos)
 
         # Health for the flight node. Reliable + transient-local so a node
         # that starts late still gets the current answer immediately instead

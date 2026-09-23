@@ -9,6 +9,6 @@ q = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                durability=DurabilityPolicy.VOLATILE,
                history=HistoryPolicy.KEEP_LAST, depth=5)
 n.create_subscription(
-    VehicleStatus, '/fmu/out/vehicle_status_v1',
+    VehicleStatus, '/uav_2/fmu/out/vehicle_status_v1',
     lambda m: n.get_logger().info(f'got nav={m.nav_state} arm={m.arming_state}'), q)
 rclpy.spin(n)

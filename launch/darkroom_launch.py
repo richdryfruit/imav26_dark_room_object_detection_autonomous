@@ -25,11 +25,10 @@ What this file adds is the two things a DARK room changes:
        (item 2 below), so the frame the HSV threshold sees does not change
        brightness every time the aircraft yaws.
 
-    2. The IR emitter matters more, not less. Passive stereo has nothing to
-       correlate in an unlit room, so the projector is what produces depth at
-       all -- and depth is what the corner sampling and the whole pose
-       estimate are built on. It is ON by default here and you should leave it
-       on; `emitter:=0` in a dark room is how the window pose stops existing.
+    2. The IR emitter would help depth here, but it is NOT touched: the
+       RealSense belongs to imav_bringup's VIO stack, which keeps the
+       projector OFF because its dots corrupt the VIO feature tracking.
+       Expect sparser depth in an unlit room.
 
 HOW THE WAY OUT FINDS A *DIFFERENT* WINDOW
 ------------------------------------------
@@ -102,12 +101,12 @@ above; set `room_sequence` to get a different exit.
 
 USEFUL COMBINATIONS
 -------------------
-    agent_only:=false            fly it. The default (true) starts the agent,
-                                 camera and detector but NOT the flight node,
+    agent_only:=false            fly it. The default (true) starts the
+                                 detector but NOT the flight node,
                                  so you can run that by hand and keep the
                                  keyboard abort.
-    flight:=false                camera + detector only. No agent, no flight
-                                 node: the bench test, and how you check the
+    flight:=false                detector only. No flight node: the bench
+                                 test, and how you check the
                                  darkroom exposure values below by eye before
                                  trusting them in the air.
     return_through_window:=false fly in, run the sequence, land inside. Fly
@@ -140,11 +139,10 @@ def generate_launch_description():
 
     # ---- the darkroom camera --------------------------------------------
     #
-    # Set by `ros2 param set` AFTER the driver is up, for the same reason the
-    # emitter is in window_scan.launch.py / window_traverse.launch.py: these
-    # are runtime ROS parameters on the camera node, not rs_launch.py launch
-    # arguments, so passing them at include time sets nothing and only earns
-    # an "unsupported parameter" warning.
+    # Set by `ros2 param set` on the RealSense node imav_bringup's VIO stack
+    # started: these are runtime ROS parameters on the camera node, and this
+    # file does not own the driver. Colour-only, apart from depth
+    # auto-exposure (left at auto), so the VIO's infra1 stream is untouched.
     #
     # The delay must clear the driver's own startup. librealsense took 8.7 s
     # to reach "RealSense Node Is Up!" on this Jetson and `ros2 param set`
@@ -240,17 +238,14 @@ def generate_launch_description():
                         'its parameters. `ros2 param set` fails outright if '
                         'the node is not up yet.'),
 
-        # These two only exist here so the `ros2 param set` target above can
-        # be built. They are also declared by the include, and forwarding
-        # means these defaults are the ones that apply -- so they must match
-        # window_traverse.launch.py's, or the param set aims at a node that
-        # does not exist while the camera itself comes up under another name.
+        # The `ros2 param set` target: the VIO stack's RealSense node,
+        # /camera/camera.
         DeclareLaunchArgument(
             'camera_name', default_value='camera',
-            description="RealSense node name; must match the include's."),
+            description="RealSense node name, as the VIO stack starts it."),
         DeclareLaunchArgument(
             'camera_namespace', default_value='camera',
-            description="RealSense namespace; must match the include's."),
+            description="RealSense namespace, as the VIO stack starts it."),
 
         mission,
         darkroom_camera,

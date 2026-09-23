@@ -361,6 +361,7 @@ class OffboardSequence(Node):
     SETPOINT_WARMUP = 20        # setpoints streamed before requesting Offboard (@20 Hz = 1 s)
     OFFBOARD_TIMEOUT = 10.0
     ARMING_TIMEOUT = 10.0
+    PX4_DATA_GRACE = 3.0             # s in PREPARATION before a missing PX4 topic is an error
     TAKEOFF_TIMEOUT = 20.0
     LANDING_TIMEOUT = 30.0
     DISARM_TIMEOUT = 5.0
@@ -380,7 +381,13 @@ class OffboardSequence(Node):
 
     # If you switch to Offboard from your RC transmitter instead of from
     # this node, set this to False.
-    REQUEST_OFFBOARD_FROM_ROS = True
+    # THE PILOT OWNS MODE AND ARMING. Both default False: Offboard comes
+    # from the transmitter's switch (or the imav_bringup dashboard), and so
+    # does the arm. This node only streams setpoints and waits, which is
+    # what makes "move the switch back" an instant, reliable takeover.
+    # True restores the node doing it itself, for a bench test with no TX.
+    REQUEST_OFFBOARD_FROM_ROS = False
+    ARM_FROM_ROS = False
     # ----------------------------------------------------------------------
 
     def __init__(self, node_name='offboard_sequence'):
@@ -431,6 +438,8 @@ class OffboardSequence(Node):
             'max_altitude', self.MAX_ALTITUDE))
         self.REQUEST_OFFBOARD_FROM_ROS = bool(self.declare_parameter(
             'request_offboard_from_ros', self.REQUEST_OFFBOARD_FROM_ROS).value)
+        self.ARM_FROM_ROS = bool(self.declare_parameter(
+            'arm_from_ros', self.ARM_FROM_ROS).value)
 
         self.DIRECTION_FRAME = str(self.declare_parameter(
             'direction_frame', self.DIRECTION_FRAME).value).strip().lower()
@@ -463,11 +472,11 @@ class OffboardSequence(Node):
         )
 
         self.offboard_control_mode_pub = self.create_publisher(
-            OffboardControlMode, '/fmu/in/offboard_control_mode', 10)
+            OffboardControlMode, '/uav_2/fmu/in/offboard_control_mode', 10)
         self.vehicle_command_pub = self.create_publisher(
-            VehicleCommand, '/fmu/in/vehicle_command', 10)
+            VehicleCommand, '/uav_2/fmu/in/vehicle_command', 10)
         self.trajectory_setpoint_pub = self.create_publisher(
-            TrajectorySetpoint, '/fmu/in/trajectory_setpoint', 10)
+            TrajectorySetpoint, '/uav_2/fmu/in/trajectory_setpoint', 10)
 
         # Compact machine-readable status for the LCD node. Same pipe-separated
         # format as the takeoff/translate nodes, and the same topic, so the LCD
@@ -514,13 +523,13 @@ class OffboardSequence(Node):
         # bridges it. This is the only place that tells us whether EKF2 is
         # actually fusing the rangefinder -- see rangefinder_is_healthy().
         self.estimator_flags_sub = self.create_subscription(
-            EstimatorStatusFlags, '/fmu/out/estimator_status_flags',
+            EstimatorStatusFlags, '/uav_2/fmu/out/estimator_status_flags',
             self.estimator_flags_callback, qos_profile=sensor_qos,
             callback_group=self.sensor_cbg)
 
         # PX4's own account of why it would take the aircraft away from us.
         self.failsafe_flags_sub = self.create_subscription(
-            FailsafeFlags, '/fmu/out/failsafe_flags',
+            FailsafeFlags, '/uav_2/fmu/out/failsafe_flags',
             self.failsafe_flags_callback, qos_profile=sensor_qos,
             callback_group=self.sensor_cbg)
 
@@ -530,8 +539,8 @@ class OffboardSequence(Node):
             self.create_subscription(
                 VehicleLandDetected, topic, self.land_detected_callback,
                 qos_profile=sensor_qos, callback_group=self.sensor_cbg)
-            for topic in ('/fmu/out/vehicle_land_detected',
-                          '/fmu/out/vehicle_land_detected_v1')
+            for topic in ('/uav_2/fmu/out/vehicle_land_detected',
+                          '/uav_2/fmu/out/vehicle_land_detected_v1')
         ]
 
         self.nav_state = VehicleStatus.NAVIGATION_STATE_MANUAL
@@ -784,7 +793,7 @@ class OffboardSequence(Node):
 
     def failsafe_summary(self):
         if self.failsafe_flags is None:
-            return "/fmu/out/failsafe_flags is not being published"
+            return "/uav_2/fmu/out/failsafe_flags is not being published"
         active = self.active_failsafes()
         return ", ".join(active) if active else "none active"
 
@@ -1073,9 +1082,15 @@ class OffboardSequence(Node):
                         reason = ("EKF2 is not fusing the rangefinder at all "
                                   "(cs_rng_hgt and cs_rng_terrain both false) -- "
                                   "check EKF2_RNG_CTRL and that the sensor is on the bus")
-            self.get_logger().error(
-                f"Not arming: {reason}.", throttle_duration_sec=2.0)
-            self.log_flight_state()
+            # PX4's topics start arriving at different times; for the first
+            # few seconds a missing one is just not here yet, not a fault.
+            if self._in_stage_for() < self.PX4_DATA_GRACE:
+                self.get_logger().info(
+                    f"Waiting for PX4 data: {reason}.", throttle_duration_sec=2.0)
+            else:
+                self.get_logger().error(
+                    f"Not arming: {reason}.", throttle_duration_sec=2.0)
+                self.log_flight_state()
             self.setpoint_counter = 0
             return
 
@@ -1123,6 +1138,15 @@ class OffboardSequence(Node):
                 f"before arming completed. PX4 failsafe: {self.failsafe_summary()}.")
             self.kill_requested = True
             self._enter_stage(self.KILLING)
+            return
+
+        if not self.ARM_FROM_ROS:
+            # The pilot arms, from the TX or the dashboard. No timeout: a node
+            # that gave up while the aircraft sat armed-ready on the pad would
+            # be worse than one that waits to be told.
+            self.get_logger().info(
+                "Offboard active. WAITING FOR YOU TO ARM (transmitter, or the "
+                "imav_bringup dashboard).", throttle_duration_sec=2.0)
             return
 
         self.publish_vehicle_command(

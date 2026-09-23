@@ -25,6 +25,7 @@ from launch_ros.substitutions import FindPackageShare
 # still lose to anything given on the command line.
 PART1_DEFAULTS = {
     'fsm_executable': 'mission_fsm_part1',
+    'pad_marker_id': '0',
     'window_marker_id': '0',
     'cruise_altitude': '2.10',
     'outbound_distance': '9.3',
@@ -39,6 +40,8 @@ def generate_launch_description():
     return LaunchDescription(
         [DeclareLaunchArgument(k, default_value=v)
          for k, v in PART1_DEFAULTS.items()]
+        + [DeclareLaunchArgument('hw_params', default_value=PathJoinSubstitution([
+            FindPackageShare('drone_testing'), 'config', 'hw_part1.yaml']))]
         + [IncludeLaunchDescription(
             PythonLaunchDescriptionSource(PathJoinSubstitution([
                 FindPackageShare('drone_testing'),
